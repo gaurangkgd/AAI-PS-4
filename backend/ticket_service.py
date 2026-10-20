@@ -23,6 +23,11 @@ def create_ticket(
     priority: str = "medium",
     status: str = "open",
     investigation_summary: Optional[str] = None,
+    title: Optional[str] = None,
+    target_team: Optional[str] = None,
+    order_id: Optional[str] = None,
+    customer_safe_summary: Optional[str] = None,
+    is_reused: bool = False,
 ) -> Dict[str, Any]:
     """Create and store a new support escalation ticket.
 
@@ -35,6 +40,11 @@ def create_ticket(
         priority: 'low', 'medium', 'high', or 'urgent'.
         status: 'open', 'in_progress', or 'resolved'.
         investigation_summary: Summary of verified order/payment investigation.
+        title: Concise title describing the support ticket.
+        target_team: Support department assigned to handle the case.
+        order_id: Associated verified or referenced order ID.
+        customer_safe_summary: Customer-safe explanation of ticket contents.
+        is_reused: True if an existing open ticket was reused for the session.
 
     Returns:
         The newly created ticket dictionary.
@@ -63,6 +73,11 @@ def create_ticket(
         "original_message": original_message,
         "escalation_reason": escalation_reason,
         "investigation_summary": investigation_summary,
+        "title": title or f"[{category.replace('_', ' ').title()}] Support Request",
+        "target_team": target_team or "general_support",
+        "order_id": order_id if order_id else None,
+        "customer_safe_summary": customer_safe_summary or escalation_reason,
+        "is_reused": is_reused,
         "created_at": created_at,
     }
 

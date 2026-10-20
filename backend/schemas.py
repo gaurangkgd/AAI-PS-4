@@ -115,6 +115,11 @@ class TicketResponse(BaseModel):
     escalation_reason: str
     investigation_summary: Optional[str] = None
     created_at: str
+    title: Optional[str] = None
+    target_team: Optional[str] = None
+    order_id: Optional[str] = None
+    customer_safe_summary: Optional[str] = None
+    is_reused: Optional[bool] = None
 
 
 class ChatRequest(BaseModel):
@@ -147,3 +152,4 @@ class ChatResponse(BaseModel):
     action_execution: Optional[Dict[str, Any]] = None
     memory: Optional[Dict[str, Any]] = None
     escalation: Optional[Dict[str, Any]] = None
+    ticket_generation: Optional[Dict[str, Any]] = None

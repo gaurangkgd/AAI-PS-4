@@ -29,6 +29,10 @@ try:
         decide_escalation,
         EscalationDecisionResult,
     )
+    from backend.agents.ticket_generation_agent import (
+        generate_support_ticket,
+        TicketGenerationResult,
+    )
 except ImportError:
     from intent_classifier import classify_intent
     from knowledge_retriever import retrieve_knowledge
@@ -51,6 +55,10 @@ except ImportError:
     from agents.escalation_decision_agent import (
         decide_escalation,
         EscalationDecisionResult,
+    )
+    from agents.ticket_generation_agent import (
+        generate_support_ticket,
+        TicketGenerationResult,
     )
 
 ORDER_DEPENDENT_INTENTS = {
@@ -88,6 +96,7 @@ class SupportState(TypedDict, total=False):
     clarification_prompt: Optional[str]
     memory: Optional[Dict[str, Any]]
     escalation: Optional[Dict[str, Any]]
+    ticket_generation: Optional[Dict[str, Any]]
 
 
 def classify_intent_node(state: SupportState) -> Dict[str, Any]:
@@ -321,7 +330,7 @@ def execute_action_node(state: SupportState) -> Dict[str, Any]:
 
 
 def escalate_node(state: SupportState) -> Dict[str, Any]:
-    """Create exactly one ticket through ticket_service when escalation is triggered, preventing duplicates."""
+    """Generate or reuse support ticket via TicketGenerationAgent (Component 8)."""
     if state.get("ticket"):
         return {}
 
@@ -332,39 +341,44 @@ def escalate_node(state: SupportState) -> Dict[str, Any]:
     priority = state.get("priority", "medium")
 
     investigation = state.get("investigation") or {}
-    order = investigation.get("order")
-    customer_id = (
-        order.get("customer_id")
-        if order
-        else (
-            state.get("customer_context", {}).get("customer_id")
-            if state.get("customer_context")
-            else None
-        )
+    customer_context = state.get("customer_context")
+    knowledge_retrieval = state.get("knowledge_retrieval")
+    knowledge_results = state.get("knowledge_results")
+    troubleshooting = state.get("troubleshooting")
+    action_execution = state.get("action_execution")
+    escalation = state.get("escalation")
+    target_team = escalation.get("target_team") if escalation else None
+
+    # Call Ticket Generation Agent
+    ticket_gen_res = generate_support_ticket(
+        message=message,
+        session_id=session_id,
+        intent=intent,
+        escalation=escalation,
+        escalation_reason=escalation_reason,
+        priority=priority,
+        target_team=target_team,
+        customer_context=customer_context,
+        investigation=investigation,
+        knowledge_retrieval=knowledge_retrieval,
+        knowledge_results=knowledge_results,
+        troubleshooting=troubleshooting,
+        action_execution=action_execution,
+        force_create=True,
     )
-    investigation_summary = investigation.get("summary")
 
-    # Duplicate ticket prevention: reuse existing open/in_progress ticket for this session
-    existing_tickets = [
-        t for t in list_tickets()
-        if t.get("session_id") == session_id and t.get("status") in {"open", "in_progress"}
-    ]
-    if existing_tickets:
-        return {"ticket": existing_tickets[0], "decision": "escalated"}
-
-    try:
-        ticket = create_ticket(
-            session_id=session_id,
-            original_message=message,
-            category=intent,
-            escalation_reason=escalation_reason,
-            customer_id=customer_id,
-            priority=priority,
-            investigation_summary=investigation_summary,
-        )
-        return {"ticket": ticket, "decision": "escalated"}
-    except Exception:
-        return {"ticket": None, "decision": "escalation_failed"}
+    if ticket_gen_res and ticket_gen_res.ticket:
+        return {
+            "ticket": ticket_gen_res.ticket,
+            "ticket_generation": ticket_gen_res.model_dump(),
+            "decision": "escalated",
+        }
+    else:
+        return {
+            "ticket": None,
+            "ticket_generation": ticket_gen_res.model_dump() if ticket_gen_res else None,
+            "decision": "escalation_failed",
+        }
 
 
 def compose_response_node(state: SupportState) -> Dict[str, Any]:
@@ -548,6 +562,7 @@ def run_support_workflow(
         "clarification_prompt": mem_res.clarification_prompt,
         "memory": None,
         "escalation": None,
+        "ticket_generation": None,
     }
 
     final_state = support_graph.invoke(initial_state)
@@ -574,4 +589,5 @@ def run_support_workflow(
         "action_execution": final_state.get("action_execution"),
         "memory": mem_summary,
         "escalation": final_state.get("escalation"),
+        "ticket_generation": final_state.get("ticket_generation"),
     }

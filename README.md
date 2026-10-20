@@ -68,7 +68,7 @@ A group mini-project for the Artificial Intelligence and Applications (AAI) subj
    cp .env.example .env
    # Edit .env and set GEMINI_API_KEY (System automatically uses rule-based fallback if unset)
    ```
-5. Run all unit tests (112 tests):
+5. Run all unit tests (151 tests):
    ```powershell
    python -m unittest discover -p "test_*.py"
    ```
@@ -131,14 +131,15 @@ A group mini-project for the Artificial Intelligence and Applications (AAI) subj
 7. **Action Execution Agent (Guarded & Safe Mutation Execution)**: The fifth specialized agent of the 11-agent architecture. Safely executes permitted e-commerce operations (order cancellation for processing orders and return/replacement requests for delivered orders) with strict ownership validation, duplicate prevention, confirmation-required handling, and zero financial mutation guarantees.
 8. **Multi-Turn Memory Agent (Isolated Session State & Anaphoric Resolution)**: The sixth specialized agent of the 11-agent architecture. Maintains isolated, bounded conversational memory across turns for each session ID. Resolves anaphoric references ('it', 'that order', 'the same order') to active order context, detects ambiguous or conflicting order mentions, enforces strict action confirmation tying affirmative customer responses ('yes') to exact pending confirmation requests, and distinguishes unverified customer claims from verified data records.
 9. **Escalation Decision Agent (Safety-Guarded Human Handoff)**: The seventh specialized agent of the 11-agent architecture. Evaluates whether a customer inquiry can be resolved automatically or requires escalation to a human support specialist. Combines Gemini-assisted contextual sentiment and urgency reasoning with strict, deterministic hard safety rules (explicit human/supervisor requests, verified payment failures, unrecognized order payment deductions, financial disputes) that cannot be overridden by the LLM. Integrates duplicate ticket prevention within multi-turn sessions and assigns cases to appropriate support departments (`billing_support`, `logistics_support`, `technical_support`, `senior_support`, `general_support`).
-10. **Local Support Knowledge Base**: Fictional knowledge articles covering payment troubleshooting, tracking delays, cancellation policies, returns, refunds, account security, and product inquiries.
-11. **Read-Only Support Investigator**: Extracts order IDs (e.g. `ORD1001`), looks up associated order details and payment records directly from mock data, and supplies a factual summary without mutating data.
-12. **Safe E-Commerce Action Service**:
+10. **Ticket Generation Agent (Grounded, Deduplicated & Partitioned Handoff)**: The eighth specialized agent of the 11-agent architecture. Converts unresolved, escalated, or human-review-required customer issues into structured, actionable support tickets. Partitions unverified customer claims from verified database facts, attaches order details only when officially verified in database records, gathers attempted troubleshooting steps and consulted knowledge articles, reuses open tickets for the same unresolved issue across session turns, avoids merging unrelated issues, generates customer-safe summaries excluding internal reasoning, and uses Gemini for title/summary refinement with deterministic fallbacks. Never executes order mutations or actions.
+11. **Local Support Knowledge Base**: Fictional knowledge articles covering payment troubleshooting, tracking delays, cancellation policies, returns, refunds, account security, and product inquiries.
+12. **Read-Only Support Investigator**: Extracts order IDs (e.g. `ORD1001`), looks up associated order details and payment records directly from mock data, and supplies a factual summary without mutating data.
+13. **Safe E-Commerce Action Service**:
    - **Cancellation**: Permitted only for `processing` orders (`ORD1002`). Rejected for `shipped` (`ORD1003`) and `delivered` (`ORD1001`).
    - **Return / Replacement**: Permitted only for `delivered` orders (`ORD1001`). Creates a unique `RET-<hex>` request. Prevents duplicate active returns.
    - **Payment Safety**: Payment records are strictly read-only and never modified.
-13. **In-Memory Ticket Service**: Manages ticket lifecycle (`open`, `in_progress`, `resolved`), priorities (`low`, `medium`, `high`, `urgent`), and filtering.
-14. **LangGraph Support Workflow (9 Nodes)**:
+14. **In-Memory Ticket Service**: Manages ticket lifecycle (`open`, `in_progress`, `resolved`), priorities (`low`, `medium`, `high`, `urgent`), rich titles, target teams, customer safe summaries, and filtering.
+15. **LangGraph Support Workflow (9 Nodes)**:
    - `classify_intent_node` &rarr; `resolve_customer_context_node` &rarr; `retrieve_knowledge_node` &rarr; `investigate_order_node` &rarr; `troubleshoot_node` &rarr; `decide_next_step_node` &rarr; `execute_action_node` / `escalate_node` &rarr; `compose_response_node`.
 
 ---

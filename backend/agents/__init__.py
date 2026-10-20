@@ -43,6 +43,13 @@ from backend.agents.escalation_decision_agent import (
     decide_escalation,
 )
 
+from backend.agents.ticket_generation_agent import (
+    TicketGenerationAgent,
+    TicketGenerationResult,
+    LLMTicketSummaryOutput,
+    generate_support_ticket,
+)
+
 __all__ = [
     "ConversationUnderstandingAgent",
     "ConversationUnderstandingResult",
@@ -71,4 +78,8 @@ __all__ = [
     "EscalationDecisionResult",
     "LLMEscalationOutput",
     "decide_escalation",
+    "TicketGenerationAgent",
+    "TicketGenerationResult",
+    "LLMTicketSummaryOutput",
+    "generate_support_ticket",
 ]
