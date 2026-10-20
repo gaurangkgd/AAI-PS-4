@@ -11,8 +11,24 @@ try:
         extract_order_id,
         investigate_order_context,
     )
-    from backend.ticket_service import create_ticket
+    from backend.ticket_service import create_ticket, list_tickets
     from backend.action_service import cancel_order, request_return
+    from backend.agents.conversation_understanding_agent import (
+        understand_conversation,
+    )
+    from backend.agents.customer_context_agent import resolve_customer_context
+    from backend.agents.knowledge_retrieval_agent import retrieve_knowledge_context
+    from backend.agents.troubleshooting_agent import diagnose_support_issue
+    from backend.agents.action_execution_agent import execute_support_action
+    from backend.agents.multi_turn_memory_agent import (
+        resolve_session_memory,
+        update_session_memory,
+        get_session_summary,
+    )
+    from backend.agents.escalation_decision_agent import (
+        decide_escalation,
+        EscalationDecisionResult,
+    )
 except ImportError:
     from intent_classifier import classify_intent
     from knowledge_retriever import retrieve_knowledge
@@ -20,8 +36,22 @@ except ImportError:
         extract_order_id,
         investigate_order_context,
     )
-    from ticket_service import create_ticket
+    from ticket_service import create_ticket, list_tickets
     from action_service import cancel_order, request_return
+    from agents.conversation_understanding_agent import understand_conversation
+    from agents.customer_context_agent import resolve_customer_context
+    from agents.knowledge_retrieval_agent import retrieve_knowledge_context
+    from agents.troubleshooting_agent import diagnose_support_issue
+    from agents.action_execution_agent import execute_support_action
+    from agents.multi_turn_memory_agent import (
+        resolve_session_memory,
+        update_session_memory,
+        get_session_summary,
+    )
+    from agents.escalation_decision_agent import (
+        decide_escalation,
+        EscalationDecisionResult,
+    )
 
 ORDER_DEPENDENT_INTENTS = {
     "order_tracking",
@@ -45,41 +75,119 @@ class SupportState(TypedDict, total=False):
     ticket: Optional[Dict[str, Any]]
     action_name: Optional[str]
     action_result: Optional[Dict[str, Any]]
+    understanding: Optional[Dict[str, Any]]
+    customer_context: Optional[Dict[str, Any]]
+    knowledge_retrieval: Optional[Dict[str, Any]]
+    troubleshooting: Optional[Dict[str, Any]]
+    action_execution: Optional[Dict[str, Any]]
+    memory_resolution: Optional[Dict[str, Any]]
+    resolved_order_id: Optional[str]
+    confirmed_action: Optional[str]
+    confirmed_order_id: Optional[str]
+    clarification_needed: Optional[bool]
+    clarification_prompt: Optional[str]
+    memory: Optional[Dict[str, Any]]
+    escalation: Optional[Dict[str, Any]]
 
 
 def classify_intent_node(state: SupportState) -> Dict[str, Any]:
-    """Classify the primary support intent of the customer message."""
+    """Classify intent and extract structured understanding using Conversation Understanding Agent (with rule-based fallback)."""
     message = state.get("message", "")
-    intent = classify_intent(message)
-    return {"intent": intent}
+    confirmed_action = state.get("confirmed_action")
+    if confirmed_action:
+        return {
+            "intent": confirmed_action,
+            "priority": "high",
+            "understanding": {
+                "intent": confirmed_action,
+                "confidence": 1.0,
+                "priority": "high",
+                "is_urgent": False,
+                "sentiment": "neutral",
+                "extracted_entities": {
+                    "order_ids": [state.get("confirmed_order_id")] if state.get("confirmed_order_id") else []
+                },
+                "classification_mode": "memory_confirmed_action",
+            },
+        }
+    understanding_result = understand_conversation(message)
+    return {
+        "intent": understanding_result.intent,
+        "priority": understanding_result.priority,
+        "understanding": understanding_result.model_dump(),
+    }
+
+
+def resolve_customer_context_node(state: SupportState) -> Dict[str, Any]:
+    """Resolve structured customer identity, order history, and prior ticket context."""
+    message = state.get("message", "")
+    inv = state.get("investigation") or {}
+    order_id = inv.get("order_id") or state.get("resolved_order_id")
+    context_result = resolve_customer_context(message=message, order_id=order_id, state=state)
+    return {"customer_context": context_result.model_dump()}
 
 
 def retrieve_knowledge_node(state: SupportState) -> Dict[str, Any]:
-    """Retrieve relevant support guidance policies from knowledge base."""
+    """Retrieve relevant support guidance policies using Knowledge Retrieval Agent."""
     message = state.get("message", "")
     intent = state.get("intent", "general_inquiry")
-    knowledge_results = retrieve_knowledge(message, intent, top_k=3)
-    return {"knowledge_results": knowledge_results}
+    retrieval_result = retrieve_knowledge_context(message=message, intent=intent, top_k=3)
+    return {
+        "knowledge_results": retrieval_result.entries,
+        "knowledge_retrieval": retrieval_result.model_dump(),
+    }
 
 
 def investigate_order_node(state: SupportState) -> Dict[str, Any]:
     """Investigate order details and payment records from mock data."""
     message = state.get("message", "")
-    investigation = investigate_order_context(message)
+    resolved_order_id = state.get("resolved_order_id")
+    investigation = investigate_order_context(message, order_id=resolved_order_id)
     return {"investigation": investigation}
 
 
-def route_after_knowledge(state: SupportState) -> str:
-    """Conditional router: route to order investigation if relevant, else to decision."""
+def troubleshoot_node(state: SupportState) -> Dict[str, Any]:
+    """Diagnose customer issue using factual investigation, context, and policy knowledge."""
     message = state.get("message", "")
     intent = state.get("intent", "general_inquiry")
-    if extract_order_id(message) or intent in ORDER_DEPENDENT_INTENTS:
+    investigation = state.get("investigation")
+    customer_context = state.get("customer_context")
+    knowledge_retrieval = state.get("knowledge_retrieval")
+    knowledge_results = state.get("knowledge_results")
+
+    troubleshooting_res = diagnose_support_issue(
+        message=message,
+        intent=intent,
+        investigation=investigation,
+        customer_context=customer_context,
+        knowledge_retrieval=knowledge_retrieval,
+        knowledge_results=knowledge_results,
+    )
+    return {"troubleshooting": troubleshooting_res.model_dump()}
+
+
+def route_after_knowledge(state: SupportState) -> str:
+    """Conditional router: route to order investigation if relevant, else to troubleshooting."""
+    message = state.get("message", "")
+    intent = state.get("intent", "general_inquiry")
+    resolved_order_id = state.get("resolved_order_id")
+    if extract_order_id(message) or resolved_order_id or intent in ORDER_DEPENDENT_INTENTS:
         return "investigate_order_node"
-    return "decide_next_step_node"
+    return "troubleshoot_node"
 
 
 def decide_next_step_node(state: SupportState) -> Dict[str, Any]:
     """Make a deterministic decision based on collected evidence, routing to actions or escalation."""
+    # Check if memory resolution flagged ambiguity or missing reference requiring clarification
+    if state.get("clarification_needed"):
+        return {
+            "decision": "memory_clarification_required",
+            "investigation": state.get("investigation") or {},
+            "escalation_reason": None,
+            "priority": "low",
+            "action_name": None,
+        }
+
     intent = state.get("intent", "general_inquiry")
     investigation = state.get("investigation") or {
         "attempted": False,
@@ -91,44 +199,47 @@ def decide_next_step_node(state: SupportState) -> Dict[str, Any]:
     }
     knowledge = state.get("knowledge_results", [])
     inv_status = investigation.get("status")
-    order = investigation.get("order")
-    payments = investigation.get("payments") or []
 
-    escalate = False
-    escalation_reason = ""
-    priority = "medium"
-    action_name = None
-
-    # Check for actionable intents when order is verified
-    if intent in {"cancellation", "return_or_replacement"} and inv_status == "found":
-        action_name = intent
+    # Check for actionable intents when order is verified (never let escalation bypass valid action execution)
+    confirmed_action = state.get("confirmed_action")
+    if (intent in {"cancellation", "return_or_replacement"} or confirmed_action) and inv_status == "found":
+        action_name = confirmed_action or intent
         decision = "execute_action"
         return {
             "decision": decision,
             "investigation": investigation,
             "action_name": action_name,
             "escalation_reason": None,
-            "priority": priority,
+            "priority": "medium",
         }
 
-    # Escalation Rule: Payment issues with failed/pending records or unrecognized order IDs
-    if intent == "payment_issue":
-        if inv_status == "found":
-            has_failed_payment = any(p.get("status") in {"failed", "pending"} for p in payments)
-            is_order_failed = order and order.get("status") in {"payment_failed", "pending_payment"}
-            if has_failed_payment or is_order_failed:
-                escalate = True
-                priority = "urgent" if has_failed_payment else "high"
-                escalation_reason = "Unresolved payment failure or transaction discrepancy requires billing team review."
-        elif inv_status == "order_not_found":
-            escalate = True
-            priority = "high"
-            escalation_reason = f"Customer reported payment deduction for unrecognized order ID '{investigation.get('order_id')}'."
+    # Evaluate escalation via Escalation Decision Agent (Component 7)
+    escalation_res = decide_escalation(
+        message=state.get("message", ""),
+        intent=intent,
+        understanding=state.get("understanding"),
+        customer_context=state.get("customer_context"),
+        investigation=investigation,
+        knowledge_retrieval=state.get("knowledge_retrieval"),
+        knowledge_results=knowledge,
+        troubleshooting=state.get("troubleshooting"),
+        action_execution=state.get("action_execution"),
+        memory=state.get("memory"),
+        session_id=state.get("session_id"),
+    )
 
-    # General state routing
-    if escalate:
-        decision = "escalate"
-    elif inv_status == "found":
+    if escalation_res.should_escalate:
+        return {
+            "decision": "escalate",
+            "investigation": investigation,
+            "escalation_reason": escalation_res.escalation_reason,
+            "priority": escalation_res.priority,
+            "action_name": None,
+            "escalation": escalation_res.model_dump(),
+        }
+
+    # General state routing if not escalated
+    if inv_status == "found":
         decision = "order_found"
     elif inv_status == "order_not_found":
         decision = "order_not_found"
@@ -142,9 +253,10 @@ def decide_next_step_node(state: SupportState) -> Dict[str, Any]:
     return {
         "decision": decision,
         "investigation": investigation,
-        "escalation_reason": escalation_reason,
-        "priority": priority,
+        "escalation_reason": None,
+        "priority": escalation_res.priority,
         "action_name": None,
+        "escalation": escalation_res.model_dump(),
     }
 
 
@@ -159,44 +271,57 @@ def route_after_decision(state: SupportState) -> str:
 
 
 def execute_action_node(state: SupportState) -> Dict[str, Any]:
-    """Execute cancellation or return/replacement action safely."""
+    """Execute cancellation or return/replacement action safely via ActionExecutionAgent."""
     # Prevent duplicate action execution for the same workflow invocation
     if state.get("action_result"):
         return {}
 
-    action_name = state.get("action_name")
+    action_name = state.get("action_name") or state.get("confirmed_action") or ""
     investigation = state.get("investigation") or {}
-    order_id = investigation.get("order_id", "")
+    order_id = state.get("confirmed_order_id") or investigation.get("order_id", "")
     message = state.get("message", "")
+    customer_context = state.get("customer_context")
 
-    if action_name == "cancellation":
-        result = cancel_order(order_id, reason="Customer requested cancellation via chat")
-        decision = "action_completed" if result["success"] else "action_rejected"
-        # Refresh investigation order status if mutated
-        if result["success"] and result.get("order"):
-            investigation["order"] = result["order"]
-            investigation["summary"] = f"Order {order_id} has been cancelled."
-        return {
-            "action_result": result,
-            "decision": decision,
-            "investigation": investigation,
-        }
+    # Determine requested return type (return vs replacement)
+    req_type = "replacement" if any(w in message.lower() for w in ["replace", "replacement", "exchange"]) else "return"
 
-    elif action_name == "return_or_replacement":
-        # Check if customer specified replacement
-        req_type = "replacement" if any(w in message.lower() for w in ["replace", "replacement", "exchange"]) else "return"
-        result = request_return(order_id, request_type=req_type, reason="Customer requested via chat")
-        decision = "action_completed" if result["success"] else "action_rejected"
-        return {
-            "action_result": result,
-            "decision": decision,
-        }
+    exec_result = execute_support_action(
+        action=action_name,
+        order_id=order_id,
+        message=message,
+        customer_context=customer_context,
+        request_type=req_type,
+    )
 
-    return {"decision": "insufficient_evidence"}
+    action_result = exec_result.details or {
+        "success": exec_result.status == "executed",
+        "action": exec_result.action,
+        "order_id": order_id,
+        "message": exec_result.message,
+    }
+
+    if exec_result.status == "executed":
+        decision = "action_completed"
+    elif exec_result.status == "confirmation_required":
+        decision = "confirmation_required"
+    else:
+        decision = "action_rejected"
+
+    # Refresh investigation order status if mutated
+    if exec_result.mutation_performed and action_result.get("order"):
+        investigation["order"] = action_result["order"]
+        investigation["summary"] = f"Order {order_id} has been cancelled."
+
+    return {
+        "action_result": action_result,
+        "action_execution": exec_result.model_dump(),
+        "decision": decision,
+        "investigation": investigation,
+    }
 
 
 def escalate_node(state: SupportState) -> Dict[str, Any]:
-    """Create exactly one ticket through ticket_service when escalation is triggered."""
+    """Create exactly one ticket through ticket_service when escalation is triggered, preventing duplicates."""
     if state.get("ticket"):
         return {}
 
@@ -208,8 +333,24 @@ def escalate_node(state: SupportState) -> Dict[str, Any]:
 
     investigation = state.get("investigation") or {}
     order = investigation.get("order")
-    customer_id = order.get("customer_id") if order else None
+    customer_id = (
+        order.get("customer_id")
+        if order
+        else (
+            state.get("customer_context", {}).get("customer_id")
+            if state.get("customer_context")
+            else None
+        )
+    )
     investigation_summary = investigation.get("summary")
+
+    # Duplicate ticket prevention: reuse existing open/in_progress ticket for this session
+    existing_tickets = [
+        t for t in list_tickets()
+        if t.get("session_id") == session_id and t.get("status") in {"open", "in_progress"}
+    ]
+    if existing_tickets:
+        return {"ticket": existing_tickets[0], "decision": "escalated"}
 
     try:
         ticket = create_ticket(
@@ -242,7 +383,19 @@ def compose_response_node(state: SupportState) -> Dict[str, Any]:
             f"Policy note ({top_kb.get('title')}): {top_kb.get('guidance')}"
         )
 
-    if decision == "action_completed" and action_result:
+    if decision == "memory_clarification_required":
+        prompt = state.get("clarification_prompt") or "Could you please clarify your request?"
+        response = prompt
+        if guidance_snippet:
+            response += f"\n\nRelevant policy guidance:\n{guidance_snippet}"
+
+    elif decision == "confirmation_required" and action_result:
+        msg = action_result.get("message", "Please confirm if you would like to proceed with this request.")
+        response = msg
+        if guidance_snippet:
+            response += f"\n\nRelevant policy guidance:\n{guidance_snippet}"
+
+    elif decision == "action_completed" and action_result:
         msg = action_result.get("message", "Action completed successfully.")
         response = f"Your request has been processed:\n{msg}"
         if guidance_snippet:
@@ -316,8 +469,10 @@ def build_support_graph():
 
     # 1. Add nodes
     workflow.add_node("classify_intent_node", classify_intent_node)
+    workflow.add_node("resolve_customer_context_node", resolve_customer_context_node)
     workflow.add_node("retrieve_knowledge_node", retrieve_knowledge_node)
     workflow.add_node("investigate_order_node", investigate_order_node)
+    workflow.add_node("troubleshoot_node", troubleshoot_node)
     workflow.add_node("decide_next_step_node", decide_next_step_node)
     workflow.add_node("execute_action_node", execute_action_node)
     workflow.add_node("escalate_node", escalate_node)
@@ -325,16 +480,18 @@ def build_support_graph():
 
     # 2. Add edges & conditional routing
     workflow.add_edge(START, "classify_intent_node")
-    workflow.add_edge("classify_intent_node", "retrieve_knowledge_node")
+    workflow.add_edge("classify_intent_node", "resolve_customer_context_node")
+    workflow.add_edge("resolve_customer_context_node", "retrieve_knowledge_node")
     workflow.add_conditional_edges(
         "retrieve_knowledge_node",
         route_after_knowledge,
         {
             "investigate_order_node": "investigate_order_node",
-            "decide_next_step_node": "decide_next_step_node",
+            "troubleshoot_node": "troubleshoot_node",
         },
     )
-    workflow.add_edge("investigate_order_node", "decide_next_step_node")
+    workflow.add_edge("investigate_order_node", "troubleshoot_node")
+    workflow.add_edge("troubleshoot_node", "decide_next_step_node")
     workflow.add_conditional_edges(
         "decide_next_step_node",
         route_after_decision,
@@ -365,6 +522,9 @@ def run_support_workflow(
         else str(uuid.uuid4())
     )
 
+    # 1. Resolve multi-turn conversational memory before downstream nodes
+    mem_res = resolve_session_memory(resolved_session_id, message)
+
     initial_state: SupportState = {
         "message": message,
         "session_id": resolved_session_id,
@@ -376,9 +536,25 @@ def run_support_workflow(
         "ticket": None,
         "action_name": None,
         "action_result": None,
+        "customer_context": None,
+        "knowledge_retrieval": None,
+        "troubleshooting": None,
+        "action_execution": None,
+        "memory_resolution": mem_res.model_dump(),
+        "resolved_order_id": mem_res.resolved_order_id,
+        "confirmed_action": mem_res.confirmed_action,
+        "confirmed_order_id": mem_res.confirmed_order_id,
+        "clarification_needed": mem_res.clarification_needed,
+        "clarification_prompt": mem_res.clarification_prompt,
+        "memory": None,
+        "escalation": None,
     }
 
     final_state = support_graph.invoke(initial_state)
+
+    # 2. Update session memory with verified outputs from the completed workflow
+    updated_session = update_session_memory(resolved_session_id, message, final_state)
+    mem_summary = get_session_summary(resolved_session_id)
 
     return {
         "session_id": resolved_session_id,
@@ -391,4 +567,11 @@ def run_support_workflow(
         "decision": final_state.get("decision"),
         "ticket": final_state.get("ticket"),
         "action_result": final_state.get("action_result"),
+        "understanding": final_state.get("understanding"),
+        "customer_context": final_state.get("customer_context"),
+        "knowledge_retrieval": final_state.get("knowledge_retrieval"),
+        "troubleshooting": final_state.get("troubleshooting"),
+        "action_execution": final_state.get("action_execution"),
+        "memory": mem_summary,
+        "escalation": final_state.get("escalation"),
     }

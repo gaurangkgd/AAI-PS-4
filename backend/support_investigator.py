@@ -26,7 +26,7 @@ def extract_order_id(message: str) -> Optional[str]:
     return None
 
 
-def investigate_order_context(message: str) -> Dict[str, Any]:
+def investigate_order_context(message: str, order_id: Optional[str] = None) -> Dict[str, Any]:
     """Perform a read-only investigation on order and payment records.
 
     Inspects in-memory mock data without issuing HTTP requests or mutating data.
@@ -40,9 +40,11 @@ def investigate_order_context(message: str) -> Dict[str, Any]:
         - payments: Optional[List[Dict]]
         - summary: Optional[str]
     """
-    order_id = extract_order_id(message)
+    target_order_id = extract_order_id(message) or (
+        order_id.strip().upper() if order_id and isinstance(order_id, str) and order_id.strip() else None
+    )
 
-    if not order_id:
+    if not target_order_id:
         return {
             "attempted": False,
             "order_id": None,
@@ -55,25 +57,25 @@ def investigate_order_context(message: str) -> Dict[str, Any]:
     # Search for matching order (read-only, deepcopy to prevent accidental mutation)
     matched_order = None
     for o in ORDERS:
-        if o.get("id", "").upper() == order_id:
+        if o.get("id", "").upper() == target_order_id:
             matched_order = copy.deepcopy(o)
             break
 
     if not matched_order:
         return {
             "attempted": True,
-            "order_id": order_id,
+            "order_id": target_order_id,
             "status": "order_not_found",
             "order": None,
             "payments": None,
-            "summary": f"No order records found for order ID '{order_id}'.",
+            "summary": f"No order records found for order ID '{target_order_id}'.",
         }
 
     # Retrieve associated payment records
     matched_payments = [
         copy.deepcopy(p)
         for p in PAYMENTS
-        if p.get("order_id", "").upper() == order_id
+        if p.get("order_id", "").upper() == target_order_id
     ]
 
     # Generate factual summary strictly based on retrieved data
@@ -91,13 +93,13 @@ def investigate_order_context(message: str) -> Dict[str, Any]:
         payment_text = "No associated payment records found."
 
     summary = (
-        f"Order {order_id} for customer {customer_id} is currently '{order_status}' "
+        f"Order {target_order_id} for customer {customer_id} is currently '{order_status}' "
         f"(Total: ${total_amount:.2f}). {payment_text}"
     )
 
     return {
         "attempted": True,
-        "order_id": order_id,
+        "order_id": target_order_id,
         "status": "found",
         "order": matched_order,
         "payments": matched_payments,

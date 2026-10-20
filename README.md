@@ -63,11 +63,16 @@ A group mini-project for the Artificial Intelligence and Applications (AAI) subj
    ```powershell
    pip install -r requirements.txt
    ```
-4. Run all unit tests (57 tests):
+4. (Optional) Configure Gemini LLM API Key:
+   ```powershell
+   cp .env.example .env
+   # Edit .env and set GEMINI_API_KEY (System automatically uses rule-based fallback if unset)
+   ```
+5. Run all unit tests (112 tests):
    ```powershell
    python -m unittest discover -p "test_*.py"
    ```
-5. Start development server:
+6. Start development server:
    ```powershell
    uvicorn main:app --reload --port 8000
    ```
@@ -119,17 +124,22 @@ A group mini-project for the Artificial Intelligence and Applications (AAI) subj
 
 1. **FastAPI Web Service**: Core endpoints for health monitoring, conversational customer chat, mock e-commerce operations, support tickets, and safe actions.
 2. **CORS Middleware**: Explicitly configured for `http://localhost:3000` and `http://127.0.0.1:3000`.
-3. **Deterministic Intent Classifier**: Rule-based system categorizing customer messages into 8 specific e-commerce intents (`payment_issue`, `order_tracking`, `cancellation`, `return_or_replacement`, `refund_status`, `account_issue`, `product_inquiry`, `general_inquiry`).
-4. **Local Support Knowledge Base**: Fictional knowledge articles covering payment troubleshooting, tracking delays, cancellation policies, returns, refunds, account security, and product inquiries.
-5. **Keyword & Intent-Based Knowledge Retriever**: Ranks and extracts the most relevant support policies matching the customer's query.
-6. **Read-Only Support Investigator**: Extracts order IDs (e.g. `ORD1001`), looks up associated order details and payment records directly from mock data, and supplies a factual summary without mutating data.
-7. **Safe E-Commerce Action Service**:
+3. **Conversation Understanding Agent (LLM + Fallback)**: The first specialized agent of the 11-agent architecture. Employs Google Gemini (`langchain-google-genai`) with structured output validation (intent, category, priority, sentiment, confidence, needs_clarification, explanation) while preserving seamless deterministic rule-based fallback when no API key is configured.
+4. **Customer Context Agent (Safe, Read-Only & Isolated)**: The second specialized agent of the 11-agent architecture. Resolves verified vs. unverified customer identity, correlates customer orders and tickets, identifies missing or ambiguous customer data, enforces privacy (strictly preventing cross-customer data exposure), and operates in a strictly read-only manner.
+5. **Knowledge Retrieval / Knowledge Base Agent (Grounded & Reranked)**: The third specialized agent of the 11-agent architecture. Retrieves verified policy and troubleshooting articles from the approved knowledge base using keyword/intent matching, with optional Gemini-assisted candidate reranking and zero-hallucination guarantees. Deterministic fallback ensures full offline functionality.
+6. **Troubleshooting Agent (Grounded Diagnosis & Read-Only Recommendations)**: The fourth specialized agent of the 11-agent architecture. Synthesizes order/payment facts, customer context, and approved knowledge articles into a structured diagnosis with evidence, recommended next steps, and escalation signals. Strictly read-only with deterministic rule-based fallback.
+7. **Action Execution Agent (Guarded & Safe Mutation Execution)**: The fifth specialized agent of the 11-agent architecture. Safely executes permitted e-commerce operations (order cancellation for processing orders and return/replacement requests for delivered orders) with strict ownership validation, duplicate prevention, confirmation-required handling, and zero financial mutation guarantees.
+8. **Multi-Turn Memory Agent (Isolated Session State & Anaphoric Resolution)**: The sixth specialized agent of the 11-agent architecture. Maintains isolated, bounded conversational memory across turns for each session ID. Resolves anaphoric references ('it', 'that order', 'the same order') to active order context, detects ambiguous or conflicting order mentions, enforces strict action confirmation tying affirmative customer responses ('yes') to exact pending confirmation requests, and distinguishes unverified customer claims from verified data records.
+9. **Escalation Decision Agent (Safety-Guarded Human Handoff)**: The seventh specialized agent of the 11-agent architecture. Evaluates whether a customer inquiry can be resolved automatically or requires escalation to a human support specialist. Combines Gemini-assisted contextual sentiment and urgency reasoning with strict, deterministic hard safety rules (explicit human/supervisor requests, verified payment failures, unrecognized order payment deductions, financial disputes) that cannot be overridden by the LLM. Integrates duplicate ticket prevention within multi-turn sessions and assigns cases to appropriate support departments (`billing_support`, `logistics_support`, `technical_support`, `senior_support`, `general_support`).
+10. **Local Support Knowledge Base**: Fictional knowledge articles covering payment troubleshooting, tracking delays, cancellation policies, returns, refunds, account security, and product inquiries.
+11. **Read-Only Support Investigator**: Extracts order IDs (e.g. `ORD1001`), looks up associated order details and payment records directly from mock data, and supplies a factual summary without mutating data.
+12. **Safe E-Commerce Action Service**:
    - **Cancellation**: Permitted only for `processing` orders (`ORD1002`). Rejected for `shipped` (`ORD1003`) and `delivered` (`ORD1001`).
    - **Return / Replacement**: Permitted only for `delivered` orders (`ORD1001`). Creates a unique `RET-<hex>` request. Prevents duplicate active returns.
    - **Payment Safety**: Payment records are strictly read-only and never modified.
-8. **In-Memory Ticket Service**: Manages ticket lifecycle (`open`, `in_progress`, `resolved`), priorities (`low`, `medium`, `high`, `urgent`), and filtering.
-9. **LangGraph Support Workflow (7 Nodes)**:
-   - `classify_intent_node` &rarr; `retrieve_knowledge_node` &rarr; `investigate_order_node` &rarr; `decide_next_step_node` &rarr; `execute_action_node` / `escalate_node` &rarr; `compose_response_node`.
+13. **In-Memory Ticket Service**: Manages ticket lifecycle (`open`, `in_progress`, `resolved`), priorities (`low`, `medium`, `high`, `urgent`), and filtering.
+14. **LangGraph Support Workflow (9 Nodes)**:
+   - `classify_intent_node` &rarr; `resolve_customer_context_node` &rarr; `retrieve_knowledge_node` &rarr; `investigate_order_node` &rarr; `troubleshoot_node` &rarr; `decide_next_step_node` &rarr; `execute_action_node` / `escalate_node` &rarr; `compose_response_node`.
 
 ---
 

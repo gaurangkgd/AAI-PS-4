@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, field_validator
 
 
@@ -140,3 +140,10 @@ class ChatResponse(BaseModel):
     decision: Optional[str] = None
     ticket: Optional[TicketResponse] = None
     action_result: Optional[ActionResponse] = None
+    understanding: Optional[Dict[str, Any]] = None
+    customer_context: Optional[Dict[str, Any]] = None
+    knowledge_retrieval: Optional[Dict[str, Any]] = None
+    troubleshooting: Optional[Dict[str, Any]] = None
+    action_execution: Optional[Dict[str, Any]] = None
+    memory: Optional[Dict[str, Any]] = None
+    escalation: Optional[Dict[str, Any]] = None
