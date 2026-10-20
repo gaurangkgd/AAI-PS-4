@@ -1,168 +1,215 @@
-# Agentic Customer Support System
+# 🤖 Agentic Customer Support System (PS-04)
 
-A group mini-project for the Artificial Intelligence and Applications (AAI) subject.
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2014-black.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-blue.svg)](https://langchain-ai.github.io/langgraph/)
+[![Google Gemini](https://img.shields.io/badge/LLM-Gemini%201.5%20Flash-4285F4.svg?logo=google&logoColor=white)](https://ai.google.dev/)
+[![Tests](https://img.shields.io/badge/Unit%20Tests-151%20Passed-brightgreen.svg)]()
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://python.org/)
 
-> **Disclaimer & Fictional Data Notice**:
-> All e-commerce data (products, orders, customers, payments), support tickets, return requests, and troubleshooting policies in the knowledge base are entirely **fictional sample data** designed solely for demonstrating this academic mini-project. They do not represent real-world timelines, guarantees, or merchant terms and are stored in-memory, resetting when the server restarts. No real financial transactions, payment reversals, or credit card debits are executed.
+An academic group project for **Artificial Intelligence and Applications (AAI)** implementing **PS-04: Agentic Customer Support System**. 
+
+The system implements a production-grade, multi-agent support architecture coordinating specialized AI agents to autonomously handle e-commerce customer support inquiries—from natural language understanding, customer identity resolution, and grounded policy retrieval to multi-step diagnosis, guarded action execution, intelligent escalation, and structured ticket generation.
 
 ---
 
-## System Architecture
+> [!NOTE]
+> **Academic Scope & Fictional Data Notice**:
+> All e-commerce data (products, orders, customers, transactions), support tickets, return authorizations, and knowledge base policies are **fictional mock records** designed solely for demonstration and academic evaluation.
+> - Data is stored strictly **in-memory** and resets upon server restart.
+> - **Zero financial transactions**: No real credit card charges, refunds, or payment debits are executed.
+
+---
+
+## 🏛️ System Architecture
 
 ```text
-+-----------------------------------------------------------+
-|               NextStore Frontend (Next.js 14)             |
-|  - App Router, JavaScript, Responsive Vanilla CSS         |
-|  - Modern Navigation, Hero, Product & Support Placeholders|
-|  - Reusable API Client (lib/api.js)                       |
-+-----------------------------+-----------------------------+
-                              | HTTP / JSON (port 3000 -> 8000)
-                              v
-+-----------------------------------------------------------+
-|                 FastAPI Backend Service                   |
-|  - CORS enabled for http://localhost:3000                 |
-|  - Deterministic Intent Classifier (8 categories)          |
-|  - Support Knowledge Base & Keyword Relevance Retriever   |
-|  - Read-Only Order & Payment Support Investigator         |
-|  - Safe Support Actions (Cancel Processing, Return Order) |
-|  - Human Support Escalation & In-Memory Ticket Service    |
-|  - LangGraph Orchestrated Support Workflow (7 Nodes)      |
-+-----------------------------------------------------------+
++---------------------------------------------------------------------------------------+
+|                            NextStore Frontend (Next.js 14)                            |
+|  - Modern Storefront (Dynamic Catalog, Shimmer Skeletons, Interactive Detail Modals)  |
+|  - My Orders Dashboard (Customer Switcher, Live Status Badges, Order Investigation)   |
+|  - Interactive AI Support Chat (Session Memory, Confirmation Prompts, Ticket Badges)  |
++-------------------------------------------+-------------------------------------------+
+                                            | HTTP / JSON (port 3000 -> 8000)
+                                            v
++---------------------------------------------------------------------------------------+
+|                               FastAPI Backend Service                                 |
+|  - Multi-Turn Memory Agent: Session Bounding, Anaphoric Resolution ("it"), Context    |
+|  - Deterministic Fallback Mode: Seamless offline capability without API keys         |
+|                                                                                       |
+|                 LangGraph Orchestrated Support Workflow (9 Nodes)                    |
+|                                                                                       |
+|   [1. Conversation Understanding]  -->  [2. Customer Context]                         |
+|              |                                    |                                   |
+|              v                                    v                                   |
+|   [3. Knowledge Retrieval]         -->  [4. Order & Payment Investigation]             |
+|              |                                    |                                   |
+|              v                                    v                                   |
+|   [5. Troubleshooting Diagnosis]   -->  [6. Escalation Decision Agent]                |
+|                                                   |                                   |
+|                    +------------------------------+------------------------------+     |
+|                    |                                                             |     |
+|                    v (Actionable Intent)                                         v (Escalated)
+|        [7. Action Execution Agent]                                   [8. Ticket Generation Agent]
+|        - Cancel (Processing Only)                                    - Deduplicated Session Reuse
+|        - Return / Replacement                                        - Claims vs. Facts Partition
+|                    |                                                             |     |
+|                    +------------------------------+------------------------------+     |
+|                                                   |                                   |
+|                                                   v                                   |
+|                                      [9. Response Composition]                        |
++---------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## Prerequisites
+## 🧩 Multi-Agent Component Status (PS-04 Architecture)
 
-- **Python**: 3.10 or higher (added to PATH)
-- **Node.js**: v18.0.0 or higher
-- **npm**: v9.0.0 or higher
+The project specification outlines an **11-component multi-agent architecture** (10 specialized domain agents + 1 Master Orchestrator):
 
----
-
-## Quick Start (Two Terminals)
-
-### Terminal 1: Start FastAPI Backend
-
-1. Navigate to the `backend` folder:
-   ```powershell
-   cd backend
-   ```
-2. Create & activate Python virtual environment:
-   - **PowerShell**:
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\Activate.ps1
-     ```
-   - **Command Prompt**:
-     ```cmd
-     python -m venv .venv
-     .\.venv\Scripts\activate.bat
-     ```
-3. Install dependencies:
-   ```powershell
-   pip install -r requirements.txt
-   ```
-4. (Optional) Configure Gemini LLM API Key:
-   ```powershell
-   cp .env.example .env
-   # Edit .env and set GEMINI_API_KEY (System automatically uses rule-based fallback if unset)
-   ```
-5. Run all unit tests (151 tests):
-   ```powershell
-   python -m unittest discover -p "test_*.py"
-   ```
-6. Start development server:
-   ```powershell
-   uvicorn main:app --reload --port 8000
-   ```
-   *Backend will run at: `http://127.0.0.1:8000` (Docs: `http://127.0.0.1:8000/docs`)*
+| # | Agent / Component | Phase | Status | Key Responsibilities |
+| :---: | :--- | :---: | :---: | :--- |
+| **1** | **Conversation Understanding Agent** | Phase 1 | ✅ **Complete** | Classifies customer intent (8 categories), detects urgency, sentiment, and extracts entity order IDs using Gemini with rule-based fallback. |
+| **2** | **Customer Context Agent** | Phase 2A | ✅ **Complete** | Resolves verified vs. unverified customer identity, correlates past orders/tickets, and strictly prevents cross-customer data leakage. |
+| **3** | **Knowledge Retrieval Agent** | Phase 2B | ✅ **Complete** | Retrieves official policy articles from the grounded knowledge base, verifies relevance, and performs optional LLM candidate reranking. |
+| **4** | **Troubleshooting Agent** | Phase 2C | ✅ **Complete** | Synthesizes verified orders, payments, and policy articles into an actionable diagnosis with escalation triggers. Read-only. |
+| **5** | **Action Execution Agent** | Phase 2D | ✅ **Complete** | Executes permitted actions (cancellation for processing orders, return/replacement for delivered items) with confirmation safety checks. |
+| **6** | **Multi-Turn Memory Agent** | Phase 2E | ✅ **Complete** | Resolves anaphora ("it", "that order"), manages multi-turn session context, and links affirmative customer confirmations ("yes") to pending actions. |
+| **7** | **Escalation Decision Agent** | Phase 2F | ✅ **Complete** | Evaluates automatic resolution vs. human handoff with hard safety policies (payment errors, supervisor requests) overriding LLM recommendations. |
+| **8** | **Ticket Generation Agent** | Phase 2G | ✅ **Complete** | Generates deduplicated, structured support tickets for human review. Partitions unverified customer claims from verified database facts. |
+| **9** | **Resolution Tracking Agent** | Phase 3 | ⏳ *Planned* | Tracks resolution lifecycles and human handoff states across session histories. |
+| **10** | **Customer Satisfaction Agent** | Phase 3 | ⏳ *Planned* | Evaluates user sentiment progression, post-resolution CSAT ratings, and feedback. |
+| **11** | **Master Orchestrator Agent** | Phase 3 | ⏳ *Planned* | Dynamically orchestrates multi-agent delegation, routing, and adaptive agent planning. |
 
 ---
 
-### Terminal 2: Start Next.js Frontend
+## 🛡️ Core Safeguards & Security Rules
 
-1. Navigate to the `frontend` folder:
-   ```powershell
-   cd frontend
-   ```
-2. Verify environment configuration in `frontend/.env.local`:
-   ```properties
-   NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
-   ```
-3. Install dependencies:
-   ```powershell
-   npm install
-   ```
-4. (Optional) Run production build:
-   ```powershell
-   npm run build
-   ```
-5. Start development server:
-   ```powershell
-   npm run dev
-   ```
-   *Frontend will run at: `http://localhost:3000`*
+1. **Zero Financial Mutation**: Payment records (`PAYMENTS`) are strictly read-only. No agent can initiate financial debits, credit card refunds, or payment modifications.
+2. **Deterministic Fallbacks**: If the Google Gemini API key is missing, rate-limited (HTTP 429), or throws an unexpected exception, all agents automatically fall back to deterministic rule engines without disrupting user workflows.
+3. **Action Confirmation Guards**: Irreversible actions (order cancellations and returns) require explicit customer confirmation (`yes` / `proceed`) before execution.
+4. **Order State Eligibility**:
+   - **Cancellation**: Permitted **only** when an order status is `processing`. Rejected if `shipped` or `delivered`.
+   - **Return / Replacement**: Permitted **only** when an order status is `delivered`. Rejects duplicate active returns.
+5. **Claims vs. Verified Facts Partitioning**: Tickets explicitly separate unverified user claims (e.g. self-reported order IDs not in DB, customer statements) from verified system records (live database order status, transaction counts).
+6. **Duplicate Prevention & Session Reuse**: The system reuses existing open tickets for the same unresolved issue within a session, while ensuring completely unrelated issues receive separate tickets.
 
 ---
 
-## Frontend Architecture
+## 🚀 Quick Start Guide
 
-- **Framework**: Next.js 14 (App Router, JavaScript)
-- **Directory Structure**:
-  - `frontend/app/layout.js`: Global root layout with responsive navigation and footer.
-  - `frontend/app/page.js`: Homepage featuring dynamic product catalog with real-time fetching from `/products`, shimmer loading skeletons, error states with retry, interactive product detail modal (`/products/{product_id}`), and integrated live AI Support Chat panel.
-  - `frontend/app/orders/page.js`: Dedicated My Orders page displaying customer orders (`GET /customers/{customer_id}/orders`), demo customer persona selector, status badges, and interactive order detail modal (`GET /orders/{order_id}`).
-  - `frontend/components/ChatPanel.js`: Interactive AI support chat interface connected to `POST /chat`, managing conversation sessions, loading indicators, intent/decision tags, and confirmed structured support cards (actions, tickets, order investigation, policy references).
-  - `frontend/app/globals.css`: Modern, responsive CSS styling tokens, product and order cards, status badges, chat bubbles, skeleton animations, modals, and mobile breakpoints.
-  - `frontend/lib/api.js`: Reusable API client reading `NEXT_PUBLIC_API_BASE_URL` with structured error handling.
-  - `frontend/.env.local`: Local environment variable pointing to the FastAPI backend.
+### Prerequisites
+- **Python**: 3.10+ (added to system PATH)
+- **Node.js**: v18.0.0+ & **npm**: v9.0.0+
 
 ---
 
-## Backend Features & Workflows
+### Terminal 1: Backend Setup & Server
 
-1. **FastAPI Web Service**: Core endpoints for health monitoring, conversational customer chat, mock e-commerce operations, support tickets, and safe actions.
-2. **CORS Middleware**: Explicitly configured for `http://localhost:3000` and `http://127.0.0.1:3000`.
-3. **Conversation Understanding Agent (LLM + Fallback)**: The first specialized agent of the 11-agent architecture. Employs Google Gemini (`langchain-google-genai`) with structured output validation (intent, category, priority, sentiment, confidence, needs_clarification, explanation) while preserving seamless deterministic rule-based fallback when no API key is configured.
-4. **Customer Context Agent (Safe, Read-Only & Isolated)**: The second specialized agent of the 11-agent architecture. Resolves verified vs. unverified customer identity, correlates customer orders and tickets, identifies missing or ambiguous customer data, enforces privacy (strictly preventing cross-customer data exposure), and operates in a strictly read-only manner.
-5. **Knowledge Retrieval / Knowledge Base Agent (Grounded & Reranked)**: The third specialized agent of the 11-agent architecture. Retrieves verified policy and troubleshooting articles from the approved knowledge base using keyword/intent matching, with optional Gemini-assisted candidate reranking and zero-hallucination guarantees. Deterministic fallback ensures full offline functionality.
-6. **Troubleshooting Agent (Grounded Diagnosis & Read-Only Recommendations)**: The fourth specialized agent of the 11-agent architecture. Synthesizes order/payment facts, customer context, and approved knowledge articles into a structured diagnosis with evidence, recommended next steps, and escalation signals. Strictly read-only with deterministic rule-based fallback.
-7. **Action Execution Agent (Guarded & Safe Mutation Execution)**: The fifth specialized agent of the 11-agent architecture. Safely executes permitted e-commerce operations (order cancellation for processing orders and return/replacement requests for delivered orders) with strict ownership validation, duplicate prevention, confirmation-required handling, and zero financial mutation guarantees.
-8. **Multi-Turn Memory Agent (Isolated Session State & Anaphoric Resolution)**: The sixth specialized agent of the 11-agent architecture. Maintains isolated, bounded conversational memory across turns for each session ID. Resolves anaphoric references ('it', 'that order', 'the same order') to active order context, detects ambiguous or conflicting order mentions, enforces strict action confirmation tying affirmative customer responses ('yes') to exact pending confirmation requests, and distinguishes unverified customer claims from verified data records.
-9. **Escalation Decision Agent (Safety-Guarded Human Handoff)**: The seventh specialized agent of the 11-agent architecture. Evaluates whether a customer inquiry can be resolved automatically or requires escalation to a human support specialist. Combines Gemini-assisted contextual sentiment and urgency reasoning with strict, deterministic hard safety rules (explicit human/supervisor requests, verified payment failures, unrecognized order payment deductions, financial disputes) that cannot be overridden by the LLM. Integrates duplicate ticket prevention within multi-turn sessions and assigns cases to appropriate support departments (`billing_support`, `logistics_support`, `technical_support`, `senior_support`, `general_support`).
-10. **Ticket Generation Agent (Grounded, Deduplicated & Partitioned Handoff)**: The eighth specialized agent of the 11-agent architecture. Converts unresolved, escalated, or human-review-required customer issues into structured, actionable support tickets. Partitions unverified customer claims from verified database facts, attaches order details only when officially verified in database records, gathers attempted troubleshooting steps and consulted knowledge articles, reuses open tickets for the same unresolved issue across session turns, avoids merging unrelated issues, generates customer-safe summaries excluding internal reasoning, and uses Gemini for title/summary refinement with deterministic fallbacks. Never executes order mutations or actions.
-11. **Local Support Knowledge Base**: Fictional knowledge articles covering payment troubleshooting, tracking delays, cancellation policies, returns, refunds, account security, and product inquiries.
-12. **Read-Only Support Investigator**: Extracts order IDs (e.g. `ORD1001`), looks up associated order details and payment records directly from mock data, and supplies a factual summary without mutating data.
-13. **Safe E-Commerce Action Service**:
-   - **Cancellation**: Permitted only for `processing` orders (`ORD1002`). Rejected for `shipped` (`ORD1003`) and `delivered` (`ORD1001`).
-   - **Return / Replacement**: Permitted only for `delivered` orders (`ORD1001`). Creates a unique `RET-<hex>` request. Prevents duplicate active returns.
-   - **Payment Safety**: Payment records are strictly read-only and never modified.
-14. **In-Memory Ticket Service**: Manages ticket lifecycle (`open`, `in_progress`, `resolved`), priorities (`low`, `medium`, `high`, `urgent`), rich titles, target teams, customer safe summaries, and filtering.
-15. **LangGraph Support Workflow (9 Nodes)**:
-   - `classify_intent_node` &rarr; `resolve_customer_context_node` &rarr; `retrieve_knowledge_node` &rarr; `investigate_order_node` &rarr; `troubleshoot_node` &rarr; `decide_next_step_node` &rarr; `execute_action_node` / `escalate_node` &rarr; `compose_response_node`.
+```powershell
+# 1. Navigate to backend directory
+cd backend
+
+# 2. Create and activate virtual environment
+python -m venv .venv
+
+# Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# Windows Command Prompt:
+.\.venv\Scripts\activate.bat
+
+# 3. Install Python dependencies
+pip install -r requirements.txt
+
+# 4. (Optional) Configure Gemini API Key
+cp .env.example .env
+# Open .env and set: GEMINI_API_KEY=your_key_here
+# Note: If unset, the backend runs 100% offline via deterministic rule-based fallbacks!
+
+# 5. Run the complete backend test suite (151 unit tests)
+python -m unittest discover -p "test_*.py"
+
+# 6. Start the FastAPI development server
+uvicorn main:app --reload --port 8000
+```
+> **Backend URL**: `http://127.0.0.1:8000`  
+> **Interactive Swagger API Docs**: `http://127.0.0.1:8000/docs`
 
 ---
 
-## API Endpoints Reference
+### Terminal 2: Frontend Setup & Server
 
-### 1. Conversational Chat
-- `POST /chat` — Full LangGraph workflow execution returning `assistant_message`, `intent`, `decision`, `knowledge_results`, `investigation`, `action_result`, and `ticket`.
+```powershell
+# 1. Navigate to frontend directory
+cd frontend
 
-### 2. Action Endpoints
-- `POST /orders/{order_id}/cancel` — Cancel processing order (`200 OK`, `400 Bad Request` if ineligible, `404 Not Found` if missing).
-- `POST /orders/{order_id}/return` — Record return/replacement request (`201 Created`, `400 Bad Request` if ineligible/duplicate, `404 Not Found`).
+# 2. Verify frontend/.env.local contains:
+# NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 
-### 3. Support Ticket Endpoints
-- `POST /tickets` — Create ticket manually (`201 Created`).
-- `GET /tickets/{ticket_id}` — Get ticket by ID (`404 Not Found` if missing).
-- `GET /tickets` — List tickets with optional `status` and `category` filters.
+# 3. Install frontend dependencies
+npm install
 
-### 4. Mock E-Commerce Endpoints
-- `GET /products` — List all products.
-- `GET /products/{product_id}` — Retrieve a single product by ID.
-- `GET /orders/{order_id}` — Retrieve an order by ID.
-- `GET /customers/{customer_id}/orders` — Retrieve all orders belonging to a customer ID.
-- `GET /payments/{order_id}` — Retrieve payment transaction records for an order.
-- `GET /health` — Health check endpoint.
-- `GET /docs` — Interactive Swagger documentation.
+# 4. (Optional) Validate production build
+npm run build
+
+# 5. Launch Next.js development server
+npm run dev
+```
+> **Frontend URL**: `http://localhost:3000`
+
+---
+
+## 🧪 Demo Personas & Test Scenarios
+
+The system includes preloaded mock e-commerce data to demonstrate every agent capability:
+
+### Fictional Orders
+
+| Order ID | Customer | Items | Total | Status | Intended Test Case |
+| :---: | :---: | :--- | :---: | :---: | :--- |
+| `ORD1001` | `CUST001` | Noise-Canceling Headphones (x1) | $129.99 | `delivered` | **Return / Replacement**: Eligible for return request. Cancellation rejected. |
+| `ORD1002` | `CUST001` | Thermal Water Bottle (x2) | $49.90 | `processing` | **Cancellation**: Eligible for cancellation with confirmation prompt. |
+| `ORD1003` | `CUST002` | Ultra-Light Running Shoes (x1) | $74.99 | `shipped` | **Order Tracking**: In transit with tracking number `TRK-US-89211`. Cancellation rejected. |
+| `ORD1004` | `CUST001` | Mechanical Keyboard (x1) | $49.99 | `cancelled` | **Payment Escalation**: Payment failed (`PAY-004`). Triggers escalation & ticket generation. |
+
+### Sample Prompts to Try in Live Chat
+- **Order Tracking**: `"Where is my order ORD1001?"`
+- **Anaphoric Resolution (Memory)**: `"When was it ordered?"` &rarr; agent resolves "it" to `ORD1001`.
+- **Cancellation with Guarded Confirmation**: `"I want to cancel order ORD1002."` &rarr; reply `"yes"` to execute.
+- **Ineligible Cancellation**: `"Please cancel my order ORD1001."` &rarr; agent cites policy: delivered orders cannot be cancelled.
+- **Return / Replacement**: `"I want to return order ORD1001 because it is defective."` &rarr; executes return authorization `RET-...`.
+- **Payment Dispute & Escalation**: `"Payment was deducted for order ORD1004 but the order failed!"` &rarr; triggers Escalation Decision Agent and creates a deduplicated support ticket with Billing Support.
+- **Explicit Human Agent Request**: `"I want to speak with a human supervisor right now."` &rarr; hard safety policy immediately escalates and creates a support ticket.
+
+---
+
+## 📡 API Reference Overview
+
+| Endpoint | Method | Category | Description |
+| :--- | :---: | :---: | :--- |
+| `/chat` | `POST` | **Chat** | Full multi-agent workflow execution returning message, intent, decision, ticket, and action details. |
+| `/orders/{order_id}/cancel` | `POST` | **Action** | Cancel processing order (strictly validates `processing` state). |
+| `/orders/{order_id}/return` | `POST` | **Action** | Initiate return or replacement request for delivered items. |
+| `/tickets` | `POST` | **Tickets** | Create a support ticket manually. |
+| `/tickets` | `GET` | **Tickets** | List all support tickets with optional `status` and `category` filters. |
+| `/tickets/{ticket_id}` | `GET` | **Tickets** | Retrieve a single support ticket by ID. |
+| `/products` | `GET` | **Store** | Retrieve catalog of mock products. |
+| `/products/{product_id}` | `GET` | **Store** | Retrieve single product details. |
+| `/orders/{order_id}` | `GET` | **Store** | Retrieve order status and item list. |
+| `/customers/{customer_id}/orders` | `GET` | **Store** | Retrieve all orders belonging to a customer account. |
+| `/payments/{order_id}` | `GET` | **Store** | Retrieve payment transaction records for an order. |
+| `/health` | `GET` | **System** | Service health status check. |
+
+---
+
+## 💻 Tech Stack Summary
+
+- **Frontend**: Next.js 14, React 18, Vanilla CSS (Design Tokens, Glassmorphism, Micro-Animations).
+- **Backend API**: FastAPI, Pydantic v2, Uvicorn.
+- **Agent Orchestration**: LangGraph, StateGraph, TypedDict state schemas.
+- **LLM Integration**: Google Gemini 1.5 Flash via `langchain-google-genai` with structured output schemas.
+- **Testing**: Python `unittest`, FastAPI `TestClient`, Mock data harnesses (151 unit tests).
+
+---
+
+Developed with ❤️ for the **Artificial Intelligence and Applications (AAI)** Course.
