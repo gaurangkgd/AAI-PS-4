@@ -1084,12 +1084,17 @@ def run_support_workflow(
                 # Determine if the assistant is asking for confirmation or has resolved
                 decision = "agentic_resolved"
                 lower_asst = asst_text.lower()
-                if extracted_action_result and extracted_action_result.get("success"):
-                    decision = "action_completed"
+                if extracted_action_result:
+                    if extracted_action_result.get("success"):
+                        decision = "action_completed"
+                    else:
+                        decision = "action_rejected"
                 elif extracted_ticket:
                     decision = "escalated"
                 elif any(phrase in lower_asst for phrase in ["are you sure", "confirm to proceed", "please reply 'yes'", "please confirm", "proceed with cancelling", "would you like to proceed"]):
                     decision = "confirmation_required"
+                elif intent == "order_tracking" and extracted_investigation and extracted_investigation.get("found"):
+                    decision = "order_found"
 
                 return {
                     "session_id": resolved_session_id,
@@ -1102,6 +1107,7 @@ def run_support_workflow(
                     "action_result": extracted_action_result,
                     "investigation": extracted_investigation,
                     "knowledge_results": extracted_knowledge,
+
 
                     "understanding": {
                         "intent": intent,
