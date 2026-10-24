@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+langgraph>=1.0.2
+langgraph-supervisor
+langgraph-checkpoint>=2.1.0
+langchain-core
+langchain-google-genai
+pydantic>=2.0
