@@ -7,13 +7,13 @@ from pydantic import BaseModel, Field
 
 try:
     from backend.tools.metrics import get_resolution_metrics, record_csat_rating
-    from backend.tools.tickets import update_ticket_status, search_tickets
-    from backend.mock_data import TICKETS, CSAT_RATINGS, reset_mock_data
+    from backend.tools.tickets import update_ticket_status, search_tickets, take_ticket, resolve_ticket
+    from backend.mock_data import TICKETS, CSAT_RATINGS, CUSTOMERS, ORDERS, PAYMENTS, reset_mock_data
     from backend.knowledge_base import KNOWLEDGE_BASE
 except ImportError:
     from tools.metrics import get_resolution_metrics, record_csat_rating
-    from tools.tickets import update_ticket_status, search_tickets
-    from mock_data import TICKETS, CSAT_RATINGS, reset_mock_data
+    from tools.tickets import update_ticket_status, search_tickets, take_ticket, resolve_ticket
+    from mock_data import TICKETS, CSAT_RATINGS, CUSTOMERS, ORDERS, PAYMENTS, reset_mock_data
     from knowledge_base import KNOWLEDGE_BASE
 
 router = APIRouter(prefix="/admin", tags=["Supervisor Dashboard"])
@@ -24,7 +24,7 @@ def reset_database() -> Dict[str, Any]:
     reset_mock_data()
     return {
         "success": True,
-        "message": "All mock data (orders, tickets, return requests, and CSAT scores) have been restored to their clean baseline state."
+        "message": "All mock data (orders, stock, tickets, inbox messages, return requests, CSAT scores and AI policies) have been restored to their clean baseline state."
     }
 
 
@@ -33,6 +33,15 @@ class TicketStatusUpdateRequest(BaseModel):
     new_status: str = Field(..., description="Target status: 'open', 'assigned', 'in_progress', 'pending_customer', 'resolved', 'closed'")
     notes: Optional[str] = Field(default="", description="Supervisor / agent resolution notes")
     assigned_to: Optional[str] = Field(default="", description="Assigned specialist name (e.g. agent_sarah)")
+
+
+class TakeCaseRequest(BaseModel):
+    agent_name: Optional[str] = Field(default="agent_supervisor", description="Name of the human specialist taking the case")
+
+
+class ResolveCaseRequest(BaseModel):
+    resolution_message: str = Field(..., description="Answer sent to the customer's inbox")
+    agent_name: Optional[str] = Field(default="agent_supervisor", description="Name of the resolving specialist")
 
 
 class CSATSubmissionRequest(BaseModel):
@@ -77,6 +86,52 @@ def update_ticket_lifecycle(ticket_id: str, payload: TicketStatusUpdateRequest) 
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=res.get("message", "Failed to update ticket status.")
         )
+    return res
+
+
+def _find_ticket_or_404(ticket_id: str) -> Dict[str, Any]:
+    norm_id = ticket_id.strip().upper()
+    ticket = next((t for t in TICKETS if t.get("ticket_id", "").upper() == norm_id), None)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket '{ticket_id}' not found.")
+    return ticket
+
+
+@router.get("/tickets/{ticket_id}/case", summary="Full case file for the human specialist (ticket, customer, order, payments, policy)")
+def get_case_file(ticket_id: str) -> Dict[str, Any]:
+    ticket = _find_ticket_or_404(ticket_id)
+    customer = next((c for c in CUSTOMERS if c.get("id", "").upper() == (ticket.get("customer_id") or "").upper()), None)
+    order = next((o for o in ORDERS if o.get("id", "").upper() == (ticket.get("order_id") or "").upper()), None)
+    payments = [p for p in PAYMENTS if order and p.get("order_id", "").upper() == order["id"].upper()]
+    policy = next((p for p in KNOWLEDGE_BASE if p.get("id", "").upper() == (ticket.get("policy_ref") or "").upper()), None)
+    other_cases = [
+        {"ticket_id": t["ticket_id"], "title": t.get("title"), "status": t.get("status")}
+        for t in TICKETS
+        if t.get("customer_id") == ticket.get("customer_id") and t["ticket_id"] != ticket["ticket_id"]
+    ]
+    return {
+        "ticket": ticket,
+        "customer": customer,
+        "order": order,
+        "payments": payments,
+        "policy": policy,
+        "other_cases": other_cases,
+    }
+
+
+@router.post("/tickets/{ticket_id}/take", summary="Human specialist takes a case (opens it for work)")
+def take_case(ticket_id: str, payload: Optional[TakeCaseRequest] = None) -> Dict[str, Any]:
+    res = take_ticket(ticket_id, payload.agent_name if payload else "")
+    if not res.get("success"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=res.get("message"))
+    return res
+
+
+@router.post("/tickets/{ticket_id}/resolve", summary="Resolve a case with a written answer delivered to the customer's inbox")
+def resolve_case(ticket_id: str, payload: ResolveCaseRequest) -> Dict[str, Any]:
+    res = resolve_ticket(ticket_id, payload.resolution_message, payload.agent_name or "")
+    if not res.get("success"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=res.get("message"))
     return res
 
 

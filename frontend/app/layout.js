@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import './globals.css';
 import { IconLock, IconTruck } from '../components/Icons';
+import HeaderActions from '../components/HeaderActions';
 
 export const metadata = {
   title: 'NextStore — Curated Electronics, Apparel & 24/7 AI Concierge',
@@ -43,6 +44,7 @@ export default function RootLayout({ children }) {
                     <span>AI Support</span>
                   </Link>
                 </li>
+                <HeaderActions />
                 <li>
                   <Link href="/admin" className="nav-link nav-admin-link">
                     Supervisor Desk

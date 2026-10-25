@@ -7,9 +7,11 @@ from typing import Optional
 from langchain_core.tools import tool
 
 try:
-    from backend.mock_data import ORDERS, RETURN_REQUESTS
+    from backend.mock_data import ORDERS, RETURN_REQUESTS, add_notification
+    from backend.policy_rules import cancel_review, return_review
 except ImportError:
-    from mock_data import ORDERS, RETURN_REQUESTS
+    from mock_data import ORDERS, RETURN_REQUESTS, add_notification
+    from policy_rules import cancel_review, return_review
 
 
 @tool
@@ -19,6 +21,8 @@ def cancel_order(order_id: str, reason: Optional[str] = "") -> str:
     Eligibility Rules:
     - Order status must be strictly 'processing'.
     - Shipped, delivered, or already cancelled orders cannot be cancelled.
+    - High-value orders are not auto-cancelled: the result has requires_human_review=true and a
+      human specialist must approve it through a support ticket.
 
     Args:
         order_id: The order ID to cancel (e.g., 'ORD1002').
@@ -76,10 +80,30 @@ def cancel_order(order_id: str, reason: Optional[str] = "") -> str:
             "message": f"Order '{norm_id}' is currently in '{current_status}' status. Only orders in 'processing' status can be cancelled."
         })
 
+    review = cancel_review(target_order)
+    if review:
+        return json.dumps({
+            "success": False,
+            "requires_human_review": True,
+            "order_id": norm_id,
+            "policy_ref": review["policy_ref"],
+            "review_category": review["category"],
+            "review_team": review["team"],
+            "message": f"{review['reason']} Please open a support ticket so a human can decide.",
+        })
+
     # Permitted: mutate in-memory status
     target_order["status"] = "cancelled"
     target_order["cancellation_reason"] = reason or "Customer requested cancellation"
     target_order["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+
+    add_notification(
+        target_order.get("customer_id"),
+        "order_update",
+        f"Order {norm_id} cancelled",
+        f"Your order {norm_id} was cancelled. Any payment hold will be released within 3-5 business days.",
+        order_id=norm_id,
+    )
 
     return json.dumps({
         "success": True,
@@ -143,6 +167,18 @@ def request_return(order_id: str, request_type: str = "return", reason: Optional
                 )
             })
 
+    review = return_review(target_order)
+    if review:
+        return json.dumps({
+            "success": False,
+            "requires_human_review": True,
+            "order_id": norm_id,
+            "policy_ref": review["policy_ref"],
+            "review_category": review["category"],
+            "review_team": review["team"],
+            "message": f"{review['reason']} Please open a support ticket so a human can decide.",
+        })
+
     # Generate return authorization and pre-paid shipping label
     request_id = f"RET-{uuid.uuid4().hex[:8].upper()}"
     tracking_no = f"1Z999AA10{uuid.uuid4().hex[:8].upper()}"
@@ -164,6 +200,14 @@ def request_return(order_id: str, request_type: str = "return", reason: Optional
     }
 
     RETURN_REQUESTS.append(new_return)
+
+    add_notification(
+        target_order.get("customer_id"),
+        "order_update",
+        f"{norm_type.capitalize()} approved for {norm_id}",
+        f"Return authorization {request_id} was approved. Pre-paid label tracking number: {tracking_no}.",
+        order_id=norm_id,
+    )
 
     return json.dumps({
         "success": True,

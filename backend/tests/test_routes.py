@@ -98,6 +98,43 @@ class TestAPIRoutes(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertIn("RET-", data["return_request"]["request_id"])
 
+    def test_checkout_creates_order_and_reduces_stock(self):
+        before = self.client.get("/products/PROD004").json()["stock"]
+        r = self.client.post(
+            "/checkout",
+            json={
+                "customer_id": "CUST999",
+                "items": [{"product_id": "PROD004", "quantity": 2}],
+                "payment_method": "upi",
+            },
+        )
+        self.assertEqual(r.status_code, 201)
+        data = r.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["order"]["status"], "processing")
+        self.assertEqual(data["order"]["total_amount"], 49.9)
+        after = self.client.get("/products/PROD004").json()["stock"]
+        self.assertEqual(after, before - 2)
+
+    def test_take_and_resolve_case_notifies_customer(self):
+        ticket_id = "TKT-B401A912"
+        r_take = self.client.post(f"/admin/tickets/{ticket_id}/take", json={"agent_name": "agent_test"})
+        self.assertEqual(r_take.status_code, 200)
+
+        r_blank = self.client.post(f"/admin/tickets/{ticket_id}/resolve", json={"resolution_message": "   "})
+        self.assertEqual(r_blank.status_code, 400)
+
+        r_resolve = self.client.post(
+            f"/admin/tickets/{ticket_id}/resolve",
+            json={"resolution_message": "Refund approved.", "agent_name": "agent_test"},
+        )
+        self.assertEqual(r_resolve.status_code, 200)
+
+        inbox = self.client.get("/customers/CUST003/notifications").json()
+        self.assertTrue(
+            any(n["type"] == "ticket_resolved" and n["message"] == "Refund approved." for n in inbox["notifications"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

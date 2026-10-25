@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { getProductImageData } from '../lib/unsplash';
+import { useCart } from '../lib/cart';
 
 /**
  * Modern, high-conversion Product Card component.
@@ -11,9 +12,18 @@ import { getProductImageData } from '../lib/unsplash';
 export default function ProductCard({ product, onSelect }) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [addNotice, setAddNotice] = useState('');
+  const { addItem } = useCart();
 
   const imgData = getProductImageData(product);
   const isOutOfStock = product.stock === 0;
+
+  const handleAdd = (e) => {
+    e.stopPropagation();
+    const result = addItem(product, 1);
+    setAddNotice(result.ok ? 'Added to cart' : result.message);
+    setTimeout(() => setAddNotice(''), 1800);
+  };
 
   return (
     <article
@@ -100,6 +110,16 @@ export default function ProductCard({ product, onSelect }) {
           ● {isOutOfStock ? 'Sold Out' : `${product.stock} in stock`}
         </span>
       </div>
+
+      <button
+        type="button"
+        className="product-add-btn"
+        disabled={isOutOfStock}
+        onClick={handleAdd}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        {isOutOfStock ? 'Sold Out' : addNotice || 'Add to Cart'}
+      </button>
     </article>
   );
 }

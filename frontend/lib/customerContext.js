@@ -1,3 +1,8 @@
+/**
+ * Demo customer personas. Orders are NOT stored here any more: the UI fetches them live
+ * from the backend (GET /customers/{id}/orders) so statuses are never stale.
+ * Prompts tagged "Human Review" are designed to hand the case to a human specialist.
+ */
 export const CUSTOMER_PROFILES = [
   {
     id: 'CUST001',
@@ -5,16 +10,14 @@ export const CUSTOMER_PROFILES = [
     email: 'alice.johnson@example.com',
     tier: 'Premium Gold',
     badge: 'Gold Tier',
-    description: 'Active shopper with 1 processing order & 1 delivered item',
-    orders: [
-      { id: 'ORD1002', status: 'processing', total: 49.90, item: 'Stainless Steel Thermal Water Bottle (x2)' },
-      { id: 'ORD1001', status: 'delivered', total: 129.99, item: 'Wireless Noise-Canceling Headphones' },
-    ],
+    description: 'Active shopper with a processing order and a delivered item',
     starterPrompts: [
       { tag: 'Auto Track', text: 'Where is my order?' },
       { tag: 'Auto Cancel', text: 'Can you cancel my order?' },
       { tag: 'Auto Return', text: 'How do I return my delivered headphones?' },
       { tag: 'Policy', text: 'What is your refund policy?' },
+      { tag: 'Human Review', text: 'I was charged twice for order ORD1001' },
+      { tag: 'Human Review', text: 'My headphones from ORD1001 are overheating and smoking' },
     ],
   },
   {
@@ -23,14 +26,13 @@ export const CUSTOMER_PROFILES = [
     email: 'bob.smith@example.com',
     tier: 'Standard Member',
     badge: 'Standard',
-    description: 'Awaiting delivery for mechanical keyboard',
-    orders: [
-      { id: 'ORD1003', status: 'shipped', total: 89.50, item: 'Ergonomic Mechanical Keyboard' },
-    ],
+    description: 'Awaiting a keyboard; also has an old delivered hoodie order',
     starterPrompts: [
       { tag: 'Auto Track', text: 'What is the tracking status of my order?' },
       { tag: 'Delivery ETA', text: 'When will my package arrive?' },
       { tag: 'Courier', text: 'Can I reschedule the courier delivery?' },
+      { tag: 'Human Review', text: 'I want to return my hoodie from order ORD1006' },
+      { tag: 'Human Review', text: 'Order ORD1003 never arrived and the tracking is stuck' },
     ],
   },
   {
@@ -39,10 +41,7 @@ export const CUSTOMER_PROFILES = [
     email: 'charlie.davis@example.com',
     tier: 'Standard Member',
     badge: 'Standard',
-    description: 'Encountered payment deduction issue on checkout',
-    orders: [
-      { id: 'ORD1004', status: 'payment_failed', total: 39.99, item: 'USB-C Multi-Port Hub' },
-    ],
+    description: 'Encountered a payment deduction issue on checkout',
     starterPrompts: [
       { tag: 'Payment Dispute', text: 'My payment failed but money was deducted' },
       { tag: 'Order Status', text: 'Did my order go through?' },
@@ -56,12 +55,10 @@ export const CUSTOMER_PROFILES = [
     tier: 'VIP Platinum',
     badge: 'VIP Platinum',
     description: 'Pending payment verification for running shoes',
-    orders: [
-      { id: 'ORD1005', status: 'pending_payment', total: 74.99, item: 'Ultra-Light Running Shoes' },
-    ],
     starterPrompts: [
       { tag: 'Payment Link', text: 'How can I complete payment for my order?' },
       { tag: 'Auto Cancel', text: 'Please cancel my pending order' },
+      { tag: 'Human Review', text: 'I did not authorize this charge, it looks like fraud' },
     ],
   },
   {
@@ -70,12 +67,12 @@ export const CUSTOMER_PROFILES = [
     email: 'evan.wright@example.com',
     tier: 'New Member',
     badge: 'New Account',
-    description: 'Fresh account with no order history',
-    orders: [],
+    description: 'Fresh account with no order history. Great for the cart demo',
     starterPrompts: [
       { tag: 'Check Orders', text: 'Do I have any pending orders?' },
       { tag: 'Catalog', text: 'What products are currently in stock?' },
       { tag: 'Warranty', text: 'What warranty comes with electronics?' },
+      { tag: 'Human Review', text: 'Can you gift wrap my purchase and add a handwritten note?' },
     ],
   },
   {
@@ -85,7 +82,6 @@ export const CUSTOMER_PROFILES = [
     tier: 'Guest Session',
     badge: 'Guest',
     description: 'Type specific Order IDs directly in conversation',
-    orders: [],
     starterPrompts: [
       { tag: 'Tracking', text: 'Where is my order ORD1001?' },
       { tag: 'Cancel', text: 'Please cancel order ORD1002' },

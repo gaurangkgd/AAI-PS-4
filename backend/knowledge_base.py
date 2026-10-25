@@ -1,5 +1,7 @@
 """Local demo support knowledge base with fictional policies and troubleshooting articles."""
 
+import copy
+
 KNOWLEDGE_BASE = [
     # 1. Payment Issue
     {
@@ -245,4 +247,130 @@ KNOWLEDGE_BASE = [
             "information",
         ],
     },
+    # 9. Return window (editable from the Supervisor Desk; the AI reads the day count from here)
+    {
+        "id": "KB-RET-003",
+        "intent": "return_or_replacement",
+        "title": "Return Window Policy",
+        "guidance": (
+            "Unused items in their original packaging can be returned within 30 days of delivery. "
+            "A pre-paid return label is issued automatically once the return is approved, and the refund "
+            "goes back to your original payment method after inspection. Returns requested after the "
+            "window need a specialist's exception approval."
+        ),
+        "keywords": [
+            "return policy",
+            "return window",
+            "refund policy",
+            "how many days",
+            "days to return",
+            "return period",
+        ],
+    },
+    # 10. Human-in-the-loop (HITL) policies: cases the AI must hand to a human specialist
+    {
+        "id": "KB-HR-001",
+        "intent": "human_review",
+        "title": "Human Review: Payment Failure or Deduction",
+        "guidance": (
+            "When a customer reports money deducted but the order shows payment_failed or pending_payment, "
+            "the AI must not promise a refund or retry. Verify the order and payment records, then open a "
+            "high-priority ticket for Billing Support, who reconcile the gateway trace and reply to the customer."
+        ),
+        "keywords": ["deducted but", "money deducted", "payment failed", "pending payment", "gateway timeout"],
+    },
+    {
+        "id": "KB-HR-002",
+        "intent": "human_review",
+        "title": "Human Review: Duplicate or Double Charge",
+        "guidance": (
+            "Any report of being charged twice for one order goes to Billing Support. The AI cannot verify "
+            "settlement with the bank, so a human must confirm the duplicate and approve the reversal."
+        ),
+        "keywords": ["charged twice", "double charge", "duplicate charge", "deducted twice", "paid twice"],
+    },
+    {
+        "id": "KB-HR-003",
+        "intent": "human_review",
+        "title": "Human Review: Suspected Fraud or Unauthorized Transaction",
+        "guidance": (
+            "If a customer says a purchase or charge was not authorized, or mentions fraud, a hacked account, "
+            "or a stolen card, the AI must stop self-service actions and escalate immediately as urgent to "
+            "Senior Support. Do not cancel, refund, or discuss account details further."
+        ),
+        "keywords": ["fraud", "unauthorized", "unauthorised", "did not authorize", "hacked", "stolen card", "not me"],
+    },
+    {
+        "id": "KB-HR-004",
+        "intent": "human_review",
+        "title": "Human Review: Delivered but Not Received / Lost Package",
+        "guidance": (
+            "When tracking says delivered but the customer never received the package, or a parcel is reported "
+            "lost or missing, the AI cannot decide between reship and refund. Escalate to Logistics Support, "
+            "who investigate with the courier and give the final decision."
+        ),
+        "keywords": ["never received", "not received", "lost package", "missing package", "marked delivered"],
+    },
+    {
+        "id": "KB-HR-005",
+        "intent": "human_review",
+        "title": "Human Review: High-Value Orders Need Manager Approval",
+        "guidance": (
+            "Cancellations and returns for any order totalling $200 or more are never auto-approved. The AI "
+            "must collect the details and open a ticket for Senior Support, who approve or decline."
+        ),
+        "keywords": ["high value", "high-value", "large order", "manager approval"],
+    },
+    {
+        "id": "KB-HR-006",
+        "intent": "human_review",
+        "title": "Human Review: Return Outside the Return Window",
+        "guidance": (
+            "If a customer asks to return an item after the return window in the Return Window Policy has "
+            "passed, the AI must not approve or flatly refuse it. Open an exception-review ticket for Senior "
+            "Support, who may approve a goodwill return."
+        ),
+        "keywords": ["return exception", "past return window", "too late to return", "outside return window"],
+    },
+    {
+        "id": "KB-HR-007",
+        "intent": "human_review",
+        "title": "Human Review: Safety Hazard or Legal Complaint",
+        "guidance": (
+            "Reports of overheating, smoke, fire, electric shock, or injury, and any mention of lawyers, legal "
+            "action or consumer court, are escalated immediately as urgent to Senior Support. The AI should "
+            "advise the customer to stop using the product and not argue liability."
+        ),
+        "keywords": ["fire", "smoke", "overheating", "injury", "lawyer", "legal action", "consumer court"],
+    },
+    {
+        "id": "KB-HR-008",
+        "intent": "human_review",
+        "title": "Human Review: Missing or Delayed Refund",
+        "guidance": (
+            "If a refund has not reached the customer after the timelines in the Refund Processing policy, "
+            "Billing Support must trace it with the bank. The AI should open a ticket and not quote new dates."
+        ),
+        "keywords": ["refund not received", "refund missing", "where is my refund", "refund delayed", "still waiting for refund"],
+    },
+    {
+        "id": "KB-HR-009",
+        "intent": "human_review",
+        "title": "Human Review: No Matching Policy (Final Decision by a Human)",
+        "guidance": (
+            "When the AI cannot find a relevant policy or verified record for a request, it must not guess. "
+            "It hands the case to a human specialist, who gives the final decision and replies to the customer's inbox."
+        ),
+        "keywords": ["no matching policy", "out of policy", "special request", "exception request"],
+    },
 ]
+
+
+# Pristine copy used by the Supervisor Desk "Reset Demo DB" button.
+INITIAL_KNOWLEDGE_BASE = copy.deepcopy(KNOWLEDGE_BASE)
+
+
+def reset_knowledge_base():
+    """Restore every policy (including supervisor edits and additions) to the demo baseline."""
+    KNOWLEDGE_BASE.clear()
+    KNOWLEDGE_BASE.extend(copy.deepcopy(INITIAL_KNOWLEDGE_BASE))

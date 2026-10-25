@@ -7,9 +7,9 @@ from typing import Optional
 from langchain_core.tools import tool
 
 try:
-    from backend.mock_data import TICKETS, CUSTOMERS
+    from backend.mock_data import TICKETS, CUSTOMERS, add_notification
 except ImportError:
-    from mock_data import TICKETS, CUSTOMERS
+    from mock_data import TICKETS, CUSTOMERS, add_notification
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "pending_customer", "resolved", "closed"}
 VALID_PRIORITIES = {"low", "medium", "high", "urgent"}
@@ -43,6 +43,8 @@ def create_support_ticket(
     order_id: Optional[str] = "",
     target_team: Optional[str] = "general_support",
     internal_notes: Optional[str] = "",
+    original_message: Optional[str] = "",
+    policy_ref: Optional[str] = "",
 ) -> str:
     """Create a structured support ticket for human specialist handoff.
 
@@ -55,6 +57,8 @@ def create_support_ticket(
         order_id: Associated order ID if applicable.
         target_team: Specialist team ('billing_support', 'logistics_support', 'technical_support', 'senior_support', 'general_support').
         internal_notes: Technical summary of investigated facts, attempted self-service steps, and evidence.
+        original_message: The customer's own words that triggered the escalation.
+        policy_ref: Knowledge-base policy ID that required human review (e.g. 'KB-HR-002').
 
     Returns:
         JSON string containing the created ticket ID, status, SLA deadline, and team routing.
@@ -84,6 +88,12 @@ def create_support_ticket(
         "target_team": norm_team,
         "assigned_to": None,
         "internal_notes": internal_notes or escalation_reason,
+        "original_message": original_message or "",
+        "policy_ref": policy_ref or None,
+        "taken_by": None,
+        "resolution_message": None,
+        "resolved_by": None,
+        "resolved_at": None,
         "customer_safe_summary": f"Your case has been routed to our {norm_team.replace('_', ' ').title()} department.",
         "created_at": created_at,
         "sla_deadline": sla_deadline,
@@ -97,6 +107,16 @@ def create_support_ticket(
     }
 
     TICKETS.append(ticket_record)
+
+    add_notification(
+        ticket_record["customer_id"],
+        "ticket_opened",
+        f"Case {ticket_id} opened",
+        f"Your request was passed to our {norm_team.replace('_', ' ').title()} team for a human decision. "
+        "Their reply will appear in this inbox.",
+        ticket_id=ticket_id,
+        order_id=ticket_record["order_id"],
+    )
 
     return json.dumps({
         "success": True,
@@ -212,3 +232,96 @@ def search_tickets(customer_id: Optional[str] = "", order_id: Optional[str] = ""
         "match_count": len(summaries),
         "tickets": summaries,
     })
+
+
+# ---------------------------------------------------------------------------
+# Supervisor Desk workflow helpers (plain functions, not agent tools)
+# ---------------------------------------------------------------------------
+
+def _find_ticket(ticket_id: str):
+    norm_tid = (ticket_id or "").strip().upper()
+    return next((t for t in TICKETS if t.get("ticket_id", "").upper() == norm_tid), None)
+
+
+def take_ticket(ticket_id: str, agent_name: str) -> dict:
+    """A human specialist takes ownership of a case: open/assigned -> in_progress, customer is notified."""
+    ticket = _find_ticket(ticket_id)
+    if not ticket:
+        return {"success": False, "message": f"Ticket '{ticket_id}' was not found."}
+
+    current = ticket.get("status")
+    if current in {"resolved", "closed"}:
+        return {"success": False, "message": f"Ticket '{ticket['ticket_id']}' is already {current}."}
+
+    agent = (agent_name or "").strip() or "agent_supervisor"
+    now_str = datetime.now(timezone.utc).isoformat()
+    first_take = current in {"open", "assigned"}
+
+    ticket["status"] = "in_progress"
+    ticket["assigned_to"] = agent
+    ticket["taken_by"] = agent
+    ticket["taken_at"] = ticket.get("taken_at") or now_str
+    ticket.setdefault("history", []).append({
+        "timestamp": now_str,
+        "from_status": current,
+        "to_status": "in_progress",
+        "assigned_to": agent,
+        "notes": f"Case taken by {agent}.",
+    })
+
+    if first_take:
+        add_notification(
+            ticket.get("customer_id"),
+            "ticket_assigned",
+            f"A specialist is working on case {ticket['ticket_id']}",
+            f"{agent} from our {(ticket.get('target_team') or 'support').replace('_', ' ').title()} team "
+            "has taken your case and is reviewing it now. You will get their answer here.",
+            ticket_id=ticket["ticket_id"],
+            order_id=ticket.get("order_id"),
+            from_agent=agent,
+        )
+
+    return {"success": True, "ticket": ticket, "message": f"Case {ticket['ticket_id']} is now in progress."}
+
+
+def resolve_ticket(ticket_id: str, resolution_message: str, agent_name: str) -> dict:
+    """Close the loop: store the human's answer, mark the ticket resolved and notify the customer."""
+    ticket = _find_ticket(ticket_id)
+    if not ticket:
+        return {"success": False, "message": f"Ticket '{ticket_id}' was not found."}
+
+    if ticket.get("status") in {"resolved", "closed"}:
+        return {"success": False, "message": f"Ticket '{ticket['ticket_id']}' is already {ticket['status']}."}
+
+    answer = (resolution_message or "").strip()
+    if not answer:
+        return {"success": False, "message": "A response for the customer is required to resolve a case."}
+
+    agent = (agent_name or "").strip() or ticket.get("taken_by") or "agent_supervisor"
+    now_str = datetime.now(timezone.utc).isoformat()
+    previous = ticket.get("status")
+
+    ticket["status"] = "resolved"
+    ticket["assigned_to"] = ticket.get("assigned_to") or agent
+    ticket["resolution_message"] = answer
+    ticket["resolved_by"] = agent
+    ticket["resolved_at"] = now_str
+    ticket.setdefault("history", []).append({
+        "timestamp": now_str,
+        "from_status": previous,
+        "to_status": "resolved",
+        "assigned_to": ticket["assigned_to"],
+        "notes": f"Resolved by {agent}. Response sent to customer inbox.",
+    })
+
+    add_notification(
+        ticket.get("customer_id"),
+        "ticket_resolved",
+        f"Case {ticket['ticket_id']} resolved",
+        answer,
+        ticket_id=ticket["ticket_id"],
+        order_id=ticket.get("order_id"),
+        from_agent=agent,
+    )
+
+    return {"success": True, "ticket": ticket, "message": f"Case {ticket['ticket_id']} resolved and the customer was notified."}

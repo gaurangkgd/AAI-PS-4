@@ -8,9 +8,11 @@ from langchain_core.tools import tool
 try:
     from backend.mock_data import CUSTOMERS, ORDERS, PAYMENTS, RETURN_REQUESTS, TICKETS
     from backend.knowledge_base import KNOWLEDGE_BASE
+    from backend.policy_rules import return_review, get_return_window_days, days_since
 except ImportError:
     from mock_data import CUSTOMERS, ORDERS, PAYMENTS, RETURN_REQUESTS, TICKETS
     from knowledge_base import KNOWLEDGE_BASE
+    from policy_rules import return_review, get_return_window_days, days_since
 
 
 @tool
@@ -34,6 +36,7 @@ def lookup_order(order_id: str) -> str:
                 "status": o.get("status"),
                 "total_amount": o.get("total_amount"),
                 "created_at": o.get("created_at"),
+                "delivered_at": o.get("delivered_at"),
                 "items": o.get("items", []),
             })
 
@@ -185,6 +188,8 @@ def check_return_eligibility(order_id: str) -> str:
     Rules:
     - Order status must be strictly 'delivered'.
     - Rejects if an active pending or approved return request already exists.
+    - Returns outside the return window, or for high-value orders, are NOT auto-approved:
+      the result has requires_human_review=true and the case must go to a human specialist.
     Returns JSON with eligibility boolean, reason, and any existing return request details.
     """
     if not order_id or not isinstance(order_id, str):
@@ -230,10 +235,25 @@ def check_return_eligibility(order_id: str) -> str:
             )
         })
 
+    review = return_review(order)
+    if review:
+        return json.dumps({
+            "order_id": norm_id,
+            "current_status": "delivered",
+            "is_eligible": False,
+            "requires_human_review": True,
+            "policy_ref": review["policy_ref"],
+            "review_category": review["category"],
+            "review_team": review["team"],
+            "reason": review["reason"],
+            "return_window_days": get_return_window_days(),
+            "days_since_delivery": days_since(order.get("delivered_at") or order.get("created_at")),
+        })
+
     return json.dumps({
         "order_id": norm_id,
         "current_status": "delivered",
         "is_eligible": True,
         "reason": f"Order '{norm_id}' is delivered and has no active returns. Eligible for return or replacement.",
-        "return_window_days": 14,
+        "return_window_days": get_return_window_days(),
     })

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '../lib/api';
+import { DATA_REFRESH_EVENT, requestDataRefresh } from '../lib/useCustomer';
 import {
   IconChat,
   IconRefresh,
@@ -89,6 +91,7 @@ export default function ChatPanel({
   initialQuery = '',
   isExpanded = false,
   customHeader = null,
+  pendingPrompt = null,
   selectedCustomerId = 'CUST001',
   onCustomerChange = null,
   showCustomerSelector = true,
@@ -109,6 +112,32 @@ export default function ChatPanel({
   }, [selectedCustomerId]);
 
   const activeCustomer = getCustomerProfile(activeCustId);
+
+  // Live orders for the header strip (never stale after a cancel, return or purchase)
+  const [liveOrders, setLiveOrders] = useState([]);
+
+  const loadOrders = useCallback(async () => {
+    if (!activeCustId || activeCustId === 'none') {
+      setLiveOrders([]);
+      return;
+    }
+    try {
+      const data = await apiFetch(`/customers/${activeCustId}/orders`);
+      setLiveOrders(Array.isArray(data) ? data : []);
+    } catch {
+      /* backend offline: keep last known orders */
+    }
+  }, [activeCustId]);
+
+  useEffect(() => {
+    loadOrders();
+    const timer = setInterval(loadOrders, 10000);
+    window.addEventListener(DATA_REFRESH_EVENT, loadOrders);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(DATA_REFRESH_EVENT, loadOrders);
+    };
+  }, [loadOrders]);
 
   useEffect(() => {
     if (initialQuery) {
@@ -206,6 +235,8 @@ export default function ChatPanel({
         };
 
         setMessages((prev) => [...prev, assistantMsg]);
+        // Actions in the chat can change orders, tickets and inbox messages: refresh them everywhere
+        requestDataRefresh();
 
       } catch (err) {
         if (!isMountedRef.current) return;
@@ -219,6 +250,16 @@ export default function ChatPanel({
     },
     [inputMessage, isLoading, sessionId, activeCustId]
   );
+
+  // One-click prompts from the side rail arrive as {text, nonce}; send them straight away
+  const sendRef = useRef(null);
+  sendRef.current = handleSendMessage;
+  useEffect(() => {
+    if (pendingPrompt && pendingPrompt.text) {
+      sendRef.current(pendingPrompt.text);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPrompt?.nonce]);
 
   const handleCsatRating = async (msgId, ticketId, stars) => {
     try {
@@ -248,6 +289,8 @@ export default function ChatPanel({
       handleSendMessage(lastFailedMessage);
     }
   };
+
+  const lastMessageId = messages.length ? messages[messages.length - 1].id : null;
 
   return (
     <div className={`chat-panel ${isExpanded ? 'chat-panel-expanded' : ''}`}>
@@ -312,9 +355,9 @@ export default function ChatPanel({
                   <span>Account Linked</span>
                 </span>
                 <span className="customer-quick-orders-text">
-                  {activeCustomer.orders.length > 0 ? (
+                  {liveOrders.length > 0 ? (
                     <>
-                      Orders: {activeCustomer.orders.map((o) => `${o.id} (${o.status})`).join(', ')}
+                      Orders: {liveOrders.map((o) => `${o.id} (${o.status.replace('_', ' ')})`).join(', ')}
                     </>
                   ) : (
                     <span>0 active orders</span>
@@ -464,6 +507,7 @@ export default function ChatPanel({
                         <button
                           type="button"
                           onClick={() => handleSendMessage('yes')}
+                          disabled={msg.id !== lastMessageId || isLoading}
                           className="btn-confirm-yes"
                         >
                           Confirm Cancellation
@@ -471,6 +515,7 @@ export default function ChatPanel({
                         <button
                           type="button"
                           onClick={() => handleSendMessage('no')}
+                          disabled={msg.id !== lastMessageId || isLoading}
                           className="btn-confirm-no"
                         >
                           Keep Order
@@ -525,6 +570,12 @@ export default function ChatPanel({
                       <div className="ticket-dept-line">
                         Department: <strong>{msg.ticket.target_team?.replace('_', ' ').toUpperCase()}</strong> &bull; Status: <code>{msg.ticket.status}</code>
                       </div>
+                      {activeCustId && activeCustId !== 'none' && (
+                        <div className="ticket-inbox-line">
+                          A human specialist will reply in your{' '}
+                          <Link href="/orders?tab=inbox">Inbox</Link>.
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -573,7 +624,7 @@ export default function ChatPanel({
                   )}
 
                   {/* 5. Customer Satisfaction (CSAT) Widget */}
-                  {(msg.decision === 'action_completed' || msg.decision === 'escalated' || msg.decision === 'agentic_resolved' || msg.action_result || msg.ticket) && msg.decision !== 'confirmation_required' && (
+                  {(msg.decision === 'action_completed' || msg.decision === 'agentic_resolved') && msg.action_result?.success !== false && (
                     <div className="csat-widget-box">
                       {csatSubmitted[msg.id] ? (
                         <div className="csat-thankyou">

@@ -1,17 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
-
-// Verified customer IDs from backend/mock_data.py
-const SAMPLE_CUSTOMERS = [
-  { id: 'CUST001', label: 'CUST001 (Alice — 2 Orders: Delivered, Processing)' },
-  { id: 'CUST002', label: 'CUST002 (Bob — 1 Order: Shipped)' },
-  { id: 'CUST003', label: 'CUST003 (Charlie — 1 Order: Payment Failed)' },
-  { id: 'CUST004', label: 'CUST004 (Diana — 1 Order: Pending Payment)' },
-  { id: 'CUST999', label: 'CUST999 (New Customer — 0 Orders)' },
-];
+import { useCustomer, DATA_REFRESH_EVENT } from '../../lib/useCustomer';
+import { CUSTOMER_PROFILES } from '../../lib/customerContext';
+import Inbox from '../../components/Inbox';
 
 /**
  * Format ISO datetime string safely.
@@ -55,8 +50,11 @@ function getStatusInfo(status = '') {
   }
 }
 
-export default function OrdersPage() {
-  const [selectedCustomerId, setSelectedCustomerId] = useState('CUST001');
+function OrdersContent() {
+  const searchParams = useSearchParams();
+  const [selectedCustomerId, setSelectedCustomerId] = useCustomer();
+  const [tab, setTab] = useState(searchParams.get('tab') === 'inbox' ? 'inbox' : 'orders');
+  const [unreadCount, setUnreadCount] = useState(0);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -81,35 +79,73 @@ export default function OrdersPage() {
     }
   }, []);
 
-  // Fetch orders on mount or when customer changes
+  // Keep the tab in sync with the ?tab= query (navbar Inbox link)
+  useEffect(() => {
+    setTab(searchParams.get('tab') === 'inbox' ? 'inbox' : 'orders');
+  }, [searchParams]);
+
+  // Fetch orders when the customer changes, then keep them fresh (cancellations, returns, new orders)
   useEffect(() => {
     let isMounted = true;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+    async function load(silent) {
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       try {
         const data = await apiFetch(`/customers/${selectedCustomerId}/orders`);
         if (isMounted) {
           setOrders(Array.isArray(data) ? data : []);
+          setError(null);
         }
       } catch (err) {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setError(err.message || `Failed to fetch orders for customer ${selectedCustomerId}.`);
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setLoading(false);
         }
       }
     }
 
-    load();
+    const refresh = () => load(true);
+    load(false);
+    const timer = setInterval(refresh, 10000);
+    window.addEventListener(DATA_REFRESH_EVENT, refresh);
 
     return () => {
       isMounted = false;
+      clearInterval(timer);
+      window.removeEventListener(DATA_REFRESH_EVENT, refresh);
     };
   }, [selectedCustomerId]);
+
+  // Unread count for the Inbox tab badge
+  useEffect(() => {
+    let isMounted = true;
+    async function loadUnread() {
+      if (!selectedCustomerId || selectedCustomerId === 'none') {
+        if (isMounted) setUnreadCount(0);
+        return;
+      }
+      try {
+        const data = await apiFetch(`/customers/${selectedCustomerId}/notifications`);
+        if (isMounted) setUnreadCount(data?.unread_count || 0);
+      } catch {
+        /* ignore */
+      }
+    }
+    loadUnread();
+    const timer = setInterval(loadUnread, 10000);
+    window.addEventListener(DATA_REFRESH_EVENT, loadUnread);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+      window.removeEventListener(DATA_REFRESH_EVENT, loadUnread);
+    };
+  }, [selectedCustomerId, tab]);
 
   // Fetch individual order details via GET /orders/{order_id}
   const handleOpenDetail = useCallback(async (orderId) => {
@@ -153,7 +189,7 @@ export default function OrdersPage() {
         <div>
           <h1 className="section-title" style={{ fontSize: '2rem' }}>My Orders</h1>
           <p className="section-desc">
-            View real-time order history, delivery statuses, and purchased items.
+            View live order history and statuses, and read replies from our support team.
           </p>
         </div>
 
@@ -168,18 +204,43 @@ export default function OrdersPage() {
             value={selectedCustomerId}
             onChange={(e) => setSelectedCustomerId(e.target.value)}
           >
-            {SAMPLE_CUSTOMERS.map((cust) => (
+            {CUSTOMER_PROFILES.map((cust) => (
               <option key={cust.id} value={cust.id}>
-                {cust.label}
+                {cust.id === 'none' ? 'Guest (no account)' : `${cust.name} (${cust.id})`}
               </option>
             ))}
           </select>
           <span className="demo-persona-badge">
-            * Selected session profile for testing different order statuses &amp; empty states
+            * Same customer as the AI chat, cart and checkout
           </span>
         </div>
       </div>
 
+      {/* Orders / Inbox tabs */}
+      <div className="orders-tabs" role="tablist" aria-label="My Orders sections">
+        <Link
+          href="/orders"
+          role="tab"
+          aria-selected={tab === 'orders'}
+          className={`orders-tab ${tab === 'orders' ? 'active' : ''}`}
+        >
+          Orders
+        </Link>
+        <Link
+          href="/orders?tab=inbox"
+          role="tab"
+          aria-selected={tab === 'inbox'}
+          className={`orders-tab ${tab === 'inbox' ? 'active' : ''}`}
+        >
+          <span>Inbox</span>
+          {unreadCount > 0 && <span className="nav-badge">{unreadCount}</span>}
+        </Link>
+      </div>
+
+      {tab === 'inbox' && <Inbox customerId={selectedCustomerId} />}
+
+      {tab === 'orders' && (
+      <>
       {/* Loading State: Skeletons */}
       {loading && (
         <div className="orders-list" aria-label="Loading orders">
@@ -296,6 +357,9 @@ export default function OrdersPage() {
             );
           })}
         </div>
+      )}
+
+      </>
       )}
 
       {/* Order Detail Modal */}
@@ -451,5 +515,19 @@ export default function OrdersPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="container orders-page">
+          <p className="section-desc">Loading your orders...</p>
+        </div>
+      }
+    >
+      <OrdersContent />
+    </Suspense>
   );
 }

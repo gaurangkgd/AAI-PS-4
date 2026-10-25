@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getProductImageData } from '../lib/unsplash';
+import { useCart } from '../lib/cart';
 import {
   IconShield,
   IconReturn,
@@ -21,6 +22,8 @@ export default function ProductDetailModal({
 }) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [addedNotice, setAddedNotice] = useState(false);
+  const [addError, setAddError] = useState('');
+  const { addItem } = useCart();
 
   // Close on Escape key
   useEffect(() => {
@@ -39,8 +42,14 @@ export default function ProductDetailModal({
   const isOutOfStock = product?.stock === 0;
 
   const handleAddToCart = () => {
-    setAddedNotice(true);
-    setTimeout(() => setAddedNotice(false), 2400);
+    const result = addItem(product, 1);
+    if (result.ok) {
+      setAddError('');
+      setAddedNotice(true);
+      setTimeout(() => setAddedNotice(false), 2400);
+    } else {
+      setAddError(result.message);
+    }
   };
 
   return (
@@ -209,7 +218,7 @@ export default function ProductDetailModal({
                     disabled={isOutOfStock}
                     onClick={handleAddToCart}
                   >
-                    {isOutOfStock ? 'Join Waitlist' : addedNotice ? 'Added to Cart' : 'Add to Bag'}
+                    {isOutOfStock ? 'Out of Stock' : addedNotice ? 'Added to Cart' : 'Add to Cart'}
                   </button>
 
                   <Link
@@ -223,6 +232,13 @@ export default function ProductDetailModal({
                     <span>Ask AI Concierge</span>
                   </Link>
                 </div>
+
+                {addError && <div className="cart-inline-error" role="alert">{addError}</div>}
+                {addedNotice && (
+                  <Link href="/cart" className="cart-inline-link" onClick={onClose}>
+                    View cart &amp; checkout &rarr;
+                  </Link>
+                )}
               </div>
             </div>
           )}

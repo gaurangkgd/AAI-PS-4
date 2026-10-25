@@ -78,6 +78,31 @@ class TestSupportGraph(unittest.TestCase):
         self.assertIn("Order Cancellation Policy", res["assistant_message"])
         self.assertGreaterEqual(len(res["knowledge_results"]), 1)
 
+    def test_duplicate_charge_goes_to_human(self):
+        res = run_support_workflow("I was charged twice for order ORD1001", session_id="test-dup-1")
+        self.assertEqual(res["decision"], "escalated")
+        self.assertEqual(res["ticket"]["target_team"], "billing_support")
+        self.assertEqual(res["ticket"]["category"], "payment_issue")
+
+    def test_return_outside_window_goes_to_human(self):
+        res = run_support_workflow("I want to return order ORD1006", session_id="test-ret-window")
+        self.assertEqual(res["decision"], "escalated")
+        self.assertEqual(res["ticket"]["category"], "return_exception")
+
+    def test_unmatched_request_goes_to_human(self):
+        res = run_support_workflow(
+            "Can you gift wrap my purchase and add a handwritten note?",
+            session_id="test-unresolved",
+            customer_id="CUST999",
+        )
+        self.assertEqual(res["decision"], "escalated")
+        self.assertEqual(res["ticket"]["category"], "unresolved_query")
+
+    def test_closing_message_says_goodbye(self):
+        res = run_support_workflow("No, that's everything. Thank you so much for your help!", session_id="test-close")
+        self.assertEqual(res["decision"], "conversation_closed")
+        self.assertIsNone(res["ticket"])
+
 
 if __name__ == "__main__":
     unittest.main()

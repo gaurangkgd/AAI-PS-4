@@ -18,6 +18,8 @@ import {
   IconEdit,
 } from '../../components/Icons';
 
+const AGENT_NAME = 'Supervisor Desk';
+
 export default function SupervisorDashboard() {
   // Operational state
   const [metrics, setMetrics] = useState(null);
@@ -58,6 +60,14 @@ export default function SupervisorDashboard() {
   // Ticket update state
   const [updatingTicketId, setUpdatingTicketId] = useState(null);
   const [updateSuccess, setUpdateSuccess] = useState(null);
+
+  // Human-in-the-loop case workspace (popup)
+  const [caseTicketId, setCaseTicketId] = useState(null);
+  const [caseFile, setCaseFile] = useState(null);
+  const [caseLoading, setCaseLoading] = useState(false);
+  const [caseError, setCaseError] = useState(null);
+  const [resolutionText, setResolutionText] = useState('');
+  const [resolving, setResolving] = useState(false);
 
   // Fetch all operations data
   const loadData = useCallback(async () => {
@@ -113,6 +123,70 @@ export default function SupervisorDashboard() {
       alert(`Failed to update ticket: ${err.message}`);
     } finally {
       setUpdatingTicketId(null);
+    }
+  };
+
+  // Open the case workspace popup with the full case file
+  const openCase = useCallback(async (ticketId) => {
+    setCaseTicketId(ticketId);
+    setCaseFile(null);
+    setCaseError(null);
+    setResolutionText('');
+    setCaseLoading(true);
+    try {
+      const data = await apiFetch(`/admin/tickets/${ticketId}/case`);
+      setCaseFile(data);
+    } catch (err) {
+      setCaseError(err.message || 'Could not load the case file.');
+    } finally {
+      setCaseLoading(false);
+    }
+  }, []);
+
+  const closeCase = () => {
+    if (resolving) return;
+    setCaseTicketId(null);
+    setCaseFile(null);
+    setCaseError(null);
+    setResolutionText('');
+  };
+
+  // "Take Case": claim it (customer is notified) and open the workspace
+  const handleTakeCase = async (ticketId) => {
+    setUpdatingTicketId(ticketId);
+    setUpdateSuccess(null);
+    try {
+      await apiFetch(`/admin/tickets/${ticketId}/take`, {
+        method: 'POST',
+        body: JSON.stringify({ agent_name: AGENT_NAME }),
+      });
+      await loadData();
+      await openCase(ticketId);
+    } catch (err) {
+      alert(`Failed to take case: ${err.message}`);
+    } finally {
+      setUpdatingTicketId(null);
+    }
+  };
+
+  // Resolve with a written answer that lands in the customer's inbox
+  const handleResolveCase = async () => {
+    if (!caseTicketId || !resolutionText.trim()) return;
+    setResolving(true);
+    try {
+      const res = await apiFetch(`/admin/tickets/${caseTicketId}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ resolution_message: resolutionText.trim(), agent_name: AGENT_NAME }),
+      });
+      setUpdateSuccess(res.message || `Case ${caseTicketId} resolved.`);
+      setResolving(false);
+      setCaseTicketId(null);
+      setCaseFile(null);
+      setResolutionText('');
+      await loadData();
+    } catch (err) {
+      setResolving(false);
+      alert(`Failed to resolve case: ${err.message}`);
     }
   };
 
@@ -288,7 +362,7 @@ export default function SupervisorDashboard() {
           <button
             type="button"
             onClick={async () => {
-              if (window.confirm("Reset all orders, tickets, and customer records back to their clean initial state?")) {
+              if (window.confirm("Reset the demo? Orders, stock, tickets, inbox messages, CSAT scores and AI policies go back to their clean starting state.")) {
                 try {
                   const res = await apiFetch('/admin/reset', { method: 'POST' });
                   setUpdateSuccess(res.message || "Database reset to initial baseline successfully.");
@@ -562,20 +636,29 @@ export default function SupervisorDashboard() {
                               <button
                                 type="button"
                                 disabled={isUpdating}
-                                onClick={() => handleUpdateStatus(t.ticket_id, 'in_progress')}
+                                onClick={() => handleTakeCase(t.ticket_id)}
                                 className="btn-action-status in_progress"
                               >
-                                Take Case
+                                {isUpdating ? 'Taking...' : 'Take Case'}
                               </button>
                             )}
-                            {(t.status === 'open' || t.status === 'in_progress' || t.status === 'assigned') && (
+                            {(t.status === 'in_progress' || t.status === 'assigned' || t.status === 'pending_customer') && (
                               <button
                                 type="button"
                                 disabled={isUpdating}
-                                onClick={() => handleUpdateStatus(t.ticket_id, 'resolved')}
+                                onClick={() => openCase(t.ticket_id)}
                                 className="btn-action-status resolved"
                               >
-                                Resolve
+                                Open Case
+                              </button>
+                            )}
+                            {(t.status === 'resolved' || t.status === 'closed') && (
+                              <button
+                                type="button"
+                                onClick={() => openCase(t.ticket_id)}
+                                className="btn-action-status"
+                              >
+                                View
                               </button>
                             )}
                             {t.status === 'resolved' && (
@@ -842,7 +925,7 @@ export default function SupervisorDashboard() {
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div className="sub-filter-pills">
-                {['all', 'delivered', 'processing', 'shipped', 'payment_failed'].map((st) => (
+                {['all', 'delivered', 'processing', 'shipped', 'cancelled', 'payment_failed', 'pending_payment'].map((st) => (
                   <button
                     key={st}
                     type="button"
@@ -1009,7 +1092,7 @@ export default function SupervisorDashboard() {
                       <td>
                         <span
                           className={`status-pill-badge ${
-                            pay.status === 'success' ? 'resolved' : 'open'
+                            pay.status === 'successful' || pay.status === 'success' ? 'resolved' : 'open'
                           }`}
                         >
                           {pay.status?.toUpperCase()}
@@ -1136,6 +1219,206 @@ export default function SupervisorDashboard() {
             )}
           </div>
         </section>
+      )}
+
+
+      {/* =========================================================================
+          HUMAN-IN-THE-LOOP CASE WORKSPACE (popup)
+         ========================================================================= */}
+      {caseTicketId && (
+        <div className="modal-backdrop" onClick={closeCase}>
+          <div
+            className="case-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="case-modal-title"
+          >
+            <div className="case-modal-header">
+              <div>
+                <span className="modal-badge">HUMAN REVIEW CASE</span>
+                <h3 id="case-modal-title" className="modal-title">
+                  {caseFile?.ticket?.title || caseTicketId}
+                </h3>
+                <div className="case-header-meta">
+                  <code className="code-cell">{caseTicketId}</code>
+                  {caseFile?.ticket && (
+                    <>
+                      <span className={`priority-pill ${caseFile.ticket.priority || 'medium'}`}>
+                        {caseFile.ticket.priority || 'medium'}
+                      </span>
+                      <span className={`status-pill-badge ${caseFile.ticket.status}`}>
+                        {caseFile.ticket.status?.replace('_', ' ')}
+                      </span>
+                      <span className="team-pill">
+                        {(caseFile.ticket.target_team || 'General').replace('_', ' ').toUpperCase()}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-modal-close"
+                onClick={closeCase}
+                disabled={resolving}
+                aria-label="Close case"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="case-modal-body">
+              {caseLoading && <p className="case-muted">Loading case file...</p>}
+              {caseError && <p className="cart-inline-error" role="alert">{caseError}</p>}
+
+              {caseFile && (() => {
+                const { ticket, customer, order, payments, policy, other_cases } = caseFile;
+                const isFinished = ticket.status === 'resolved' || ticket.status === 'closed';
+                return (
+                  <>
+                    <section className="case-section">
+                      <h4 className="case-section-title">What the customer said</h4>
+                      <blockquote className="case-quote">
+                        {ticket.original_message || 'No message was recorded for this case.'}
+                      </blockquote>
+                    </section>
+
+                    <section className="case-section">
+                      <h4 className="case-section-title">Why the AI handed this to a human</h4>
+                      <p className="case-text">{ticket.escalation_reason}</p>
+                      {policy && (
+                        <div className="case-policy">
+                          <div className="case-policy-head">
+                            <span className="policy-id-tag">{policy.id}</span>
+                            <strong>{policy.title}</strong>
+                          </div>
+                          <p className="case-text">{policy.guidance}</p>
+                        </div>
+                      )}
+                      {ticket.internal_notes && ticket.internal_notes !== ticket.escalation_reason && (
+                        <p className="case-notes">
+                          <strong>AI investigation notes:</strong> {ticket.internal_notes}
+                        </p>
+                      )}
+                    </section>
+
+                    <div className="case-grid">
+                      <section className="case-section">
+                        <h4 className="case-section-title">Customer</h4>
+                        {customer ? (
+                          <dl className="case-dl">
+                            <div><dt>Name</dt><dd>{customer.name} ({customer.id})</dd></div>
+                            <div><dt>Tier</dt><dd>{customer.tier?.toUpperCase()}</dd></div>
+                            <div><dt>Email</dt><dd>{customer.email}</dd></div>
+                            <div><dt>Phone</dt><dd>{customer.phone || 'n/a'}</dd></div>
+                          </dl>
+                        ) : (
+                          <p className="case-muted">Guest session: no customer account linked, so no inbox delivery is possible.</p>
+                        )}
+                        {other_cases?.length > 0 && (
+                          <p className="case-muted">
+                            Other cases: {other_cases.map((c) => `${c.ticket_id} (${c.status})`).join(', ')}
+                          </p>
+                        )}
+                      </section>
+
+                      <section className="case-section">
+                        <h4 className="case-section-title">Order &amp; payment</h4>
+                        {order ? (
+                          <>
+                            <dl className="case-dl">
+                              <div><dt>Order</dt><dd>{order.id}</dd></div>
+                              <div><dt>Status</dt><dd>{order.status?.replace('_', ' ')}</dd></div>
+                              <div><dt>Total</dt><dd>${order.total_amount?.toFixed(2)}</dd></div>
+                              <div>
+                                <dt>Items</dt>
+                                <dd>{order.items?.map((it) => `${it.quantity}x ${it.name}`).join(', ')}</dd>
+                              </div>
+                            </dl>
+                            {payments?.length > 0 && (
+                              <ul className="case-payments">
+                                {payments.map((pay) => (
+                                  <li key={pay.id}>
+                                    <code>{pay.id}</code> {pay.status} &bull; ${pay.amount?.toFixed(2)} &bull;{' '}
+                                    {pay.payment_method?.replace('_', ' ')} &bull; {pay.transaction_ref}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </>
+                        ) : (
+                          <p className="case-muted">No order is attached to this case.</p>
+                        )}
+                      </section>
+                    </div>
+
+                    {ticket.history?.length > 0 && (
+                      <section className="case-section">
+                        <h4 className="case-section-title">Case history</h4>
+                        <ul className="case-history">
+                          {ticket.history.map((h, idx) => (
+                            <li key={idx}>
+                              <span className="case-history-time">
+                                {new Date(h.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              <span>{h.notes || h.event}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
+                    <section className="case-section case-response">
+                      <h4 className="case-section-title">
+                        {isFinished ? 'Response sent to the customer' : 'Your response to the customer'}
+                      </h4>
+                      {isFinished ? (
+                        <blockquote className="case-quote">
+                          {ticket.resolution_message || 'This case was closed without a written response.'}
+                          {ticket.resolved_by && <div className="case-muted">Resolved by {ticket.resolved_by}</div>}
+                        </blockquote>
+                      ) : (
+                        <>
+                          <textarea
+                            className="modal-textarea case-textarea"
+                            rows={6}
+                            value={resolutionText}
+                            onChange={(e) => setResolutionText(e.target.value)}
+                            placeholder="Write the final answer or decision for the customer. It will be delivered to their Inbox under My Orders."
+                            disabled={resolving}
+                            aria-label="Response to the customer"
+                          />
+                          <span className="modal-help-text">
+                            {ticket.customer_id
+                              ? `Delivered to ${customer?.name || ticket.customer_id}'s Inbox when you resolve.`
+                              : 'Guest case: there is no inbox to deliver this to.'}
+                          </span>
+                        </>
+                      )}
+                    </section>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="case-modal-footer">
+              <button type="button" className="btn-modal-cancel" onClick={closeCase} disabled={resolving}>
+                {caseFile && (caseFile.ticket.status === 'resolved' || caseFile.ticket.status === 'closed') ? 'Close' : 'Keep working later'}
+              </button>
+              {caseFile && caseFile.ticket.status !== 'resolved' && caseFile.ticket.status !== 'closed' && (
+                <button
+                  type="button"
+                  className="btn-modal-save"
+                  onClick={handleResolveCase}
+                  disabled={resolving || !resolutionText.trim()}
+                >
+                  {resolving ? 'Sending...' : 'Resolve & Send to Customer'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* =========================================================================

@@ -72,6 +72,12 @@ try:
         ESCALATION_PROMPT,
     )
     from backend.mock_data import CUSTOMERS, ORDERS, PAYMENTS, TICKETS
+    from backend.policy_rules import (
+        cancel_review,
+        detect_human_review_trigger,
+        get_policy,
+        kb_has_relevant_match,
+    )
 except ImportError:
     from tools.investigation import (
         lookup_order,
@@ -101,6 +107,12 @@ except ImportError:
         ESCALATION_PROMPT,
     )
     from mock_data import CUSTOMERS, ORDERS, PAYMENTS, TICKETS
+    from policy_rules import (
+        cancel_review,
+        detect_human_review_trigger,
+        get_policy,
+        kb_has_relevant_match,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +125,11 @@ PAYMENT_ISSUE_RE = re.compile(r"\b(payment|deducted|debited|charged|failed|gatew
 CANCEL_RE = re.compile(r"\b(cancel|cancellation|canceling|cancelling|abort\s+order)\b", re.IGNORECASE)
 RETURN_RE = re.compile(r"\b(return|replace|replacement|exchange|damaged|broken|defective|wrong\s+item)\b", re.IGNORECASE)
 TRACK_RE = re.compile(r"\b(track|tracking|where\s+is|status|shipped|delivery|courier|dispatch)\b", re.IGNORECASE)
+MY_ORDERS_RE = re.compile(r"\b(my|any|pending|recent|active|open)\s+orders?\b", re.IGNORECASE)
+CLOSING_RE = re.compile(
+    r"\b(thanks|thank\s+you|thx|that'?s\s+(all|everything)|nothing\s+else|no\s+more\s+questions|goodbye|bye|all\s+good|i'?m\s+good)\b",
+    re.IGNORECASE,
+)
 
 
 class SupportAgentState(TypedDict, total=False):
@@ -132,6 +149,10 @@ class SupportAgentState(TypedDict, total=False):
     action_result: Optional[Dict[str, Any]]
     decision: Optional[str]
     assistant_message: str
+    escalation_reason: Optional[str]
+    target_team: Optional[str]
+    ticket_category: Optional[str]
+    policy_ref: Optional[str]
 
 
 # ---------------------------------------------------------------------------
@@ -169,13 +190,13 @@ def detect_intent(text: str) -> str:
         return "cancellation"
     if RETURN_RE.search(lower):
         return "return_or_replacement"
-    if TRACK_RE.search(lower):
+    if TRACK_RE.search(lower) or MY_ORDERS_RE.search(lower):
         return "order_tracking"
     if any(w in lower for w in ["warranty", "guarantee"]):
         return "warranty_inquiry"
     if any(w in lower for w in ["login", "password", "account", "profile"]):
         return "account_issue"
-    if any(w in lower for w in ["price", "specs", "stock", "feature"]):
+    if any(w in lower for w in ["price", "specs", "stock", "feature", "promotion", "discount", "coupon", "available", "availability", "details"]):
         return "product_inquiry"
     return "general_inquiry"
 
@@ -192,14 +213,46 @@ def detect_sentiment(text: str) -> str:
     return "neutral"
 
 
-def supervisor_node(state: SupportAgentState) -> Dict[str, Any]:
-    """Supervisor router node: inspects context, memory, and delegates to specialist."""
+def _pick_order_for_review(customer_id: str, category: str) -> Optional[str]:
+    """Best-guess order for a human-review case when the customer did not name one."""
+    orders = sorted(
+        (o for o in ORDERS if o.get("customer_id", "").upper() == customer_id.upper()),
+        key=lambda o: o.get("created_at", ""),
+        reverse=True,
+    )
+    if not orders:
+        return None
+    preferred = None
+    if category == "delivery_dispute":
+        preferred = next((o for o in orders if o.get("status") in {"delivered", "shipped"}), None)
+    elif category == "payment_issue":
+        preferred = next((o for o in orders if o.get("status") in {"payment_failed", "pending_payment"}), None)
+    return (preferred or orders[0])["id"]
+
+
+def _escalation_update(reason: str, team: str, category: str, policy_ref: str, priority: str = "medium") -> Dict[str, Any]:
+    """State update that hands the conversation to the Escalation & Ticket Agent."""
+    return {
+        "active_agent": "escalation_agent",
+        "decision": "escalate",
+        "priority": priority,
+        "escalation_reason": reason,
+        "target_team": team,
+        "ticket_category": category,
+        "policy_ref": policy_ref,
+        "pending_confirmation": None,
+    }
+
+
+def _supervisor_decide(state: SupportAgentState) -> Dict[str, Any]:
+    """Supervisor routing logic: inspects context, memory, and delegates to specialist."""
     message = state.get("user_message", "")
     session_id = state.get("session_id", "")
     
     # Check memory for existing active order ID or extract from current message
     order_id, cust_id = extract_entities(message)
-    active_order_id = order_id or state.get("order_id")
+    remembered_order_id = order_id or state.get("order_id")
+    active_order_id = remembered_order_id
     active_cust_id = cust_id or state.get("customer_id")
 
     # If active order exists but customer_id missing, infer from order
@@ -278,6 +331,52 @@ def supervisor_node(state: SupportAgentState) -> Dict[str, Any]:
                 "decision": "action_cancelled_by_user",
             }
 
+    # Customer signals they are done -> warm goodbye (no ticket, no further tools)
+    if (
+        CLOSING_RE.search(message)
+        and intent == "general_inquiry"
+        and not order_id
+        and len(message.split()) <= 15
+    ):
+        closing_name = "there"
+        if active_cust_id:
+            closing_cust = next((c for c in CUSTOMERS if c.get("id", "").upper() == active_cust_id.upper()), None)
+            if closing_cust:
+                closing_name = closing_cust.get("name", "there").split()[0]
+        return {
+            "active_agent": "supervisor",
+            "intent": "general_inquiry",
+            "customer_id": active_cust_id,
+            "pending_confirmation": None,
+            "assistant_message": (
+                f"You're very welcome, {closing_name}! Thank you for choosing NextStore. "
+                "If anything else comes up, I'm here 24/7. Have a wonderful day!"
+            ),
+            "decision": "conversation_closed",
+        }
+
+    # Policy-mandated human review (payment disputes, fraud, lost parcels, safety, ...)
+    review_trigger = detect_human_review_trigger(message)
+    if review_trigger:
+        review_order_id = remembered_order_id or (
+            _pick_order_for_review(active_cust_id, review_trigger["category"]) if active_cust_id else None
+        ) or active_order_id
+        update = _escalation_update(
+            review_trigger["reason"],
+            review_trigger["team"],
+            review_trigger["category"],
+            review_trigger["policy_ref"],
+            review_trigger["priority"],
+        )
+        update.update({
+            "decision": "human_review_required",
+            "intent": intent,
+            "order_id": review_order_id,
+            "customer_id": active_cust_id,
+            "sentiment": sentiment,
+        })
+        return update
+
     # Explicit human agent / supervisor request -> immediate escalation
     if HUMAN_AGENT_RE.search(message) and any(w in message.lower() for w in ["speak", "talk", "transfer", "connect", "human", "manager", "supervisor"]):
         return {
@@ -288,10 +387,14 @@ def supervisor_node(state: SupportAgentState) -> Dict[str, Any]:
             "sentiment": sentiment,
             "priority": "urgent" if sentiment == "frustrated" else "high",
             "decision": "direct_human_escalation",
+            "escalation_reason": "Customer explicitly asked to speak with a human specialist.",
+            "target_team": "senior_support",
+            "ticket_category": "human_request",
+            "policy_ref": "",
         }
 
     # Actionable requests vs Policy inquiries
-    is_policy_inquiry = any(w in message.lower() for w in ["policy", "how to", "what is", "rules", "faq", "terms", "condition", "can i", "tell me about"])
+    is_policy_inquiry = any(w in message.lower() for w in ["policy", "how to", "how do i", "how can i", "what is", "rules", "faq", "terms", "condition", "can i", "tell me about"])
     if intent in {"cancellation", "return_or_replacement"} and not is_policy_inquiry:
         return {
             "active_agent": "action_agent",
@@ -313,6 +416,21 @@ def supervisor_node(state: SupportAgentState) -> Dict[str, Any]:
         "priority": priority,
         "decision": "route_to_triage",
     }
+
+
+# Per-turn outputs. The checkpointer keeps state between turns, so without this reset a ticket or
+# action card from an earlier turn would be shown again on an unrelated reply (e.g. a goodbye).
+_TURN_OUTPUT_RESET: Dict[str, Any] = {
+    "ticket": None,
+    "action_result": None,
+    "investigation": None,
+    "knowledge_results": [],
+}
+
+
+def supervisor_node(state: SupportAgentState) -> Dict[str, Any]:
+    """Supervisor router node: clears last turn's outputs, then routes the new message."""
+    return {**_TURN_OUTPUT_RESET, **_supervisor_decide(state)}
 
 
 def supervisor_router(state: SupportAgentState) -> str:
@@ -373,6 +491,7 @@ def triage_agent_node(state: SupportAgentState) -> Dict[str, Any]:
                     "status": order_data.get("status"),
                     "total_amount": order_data.get("total_amount"),
                     "created_at": order_data.get("created_at"),
+                    "delivered_at": order_data.get("delivered_at"),
                     "items": order_data.get("items", []),
                 },
                 "payments": pay_data.get("payments", []),
@@ -416,7 +535,26 @@ def triage_agent_node(state: SupportAgentState) -> Dict[str, Any]:
             "priority": "high",
             "escalation_reason": escalation_reason,
             "target_team": target_team,
+            "ticket_category": None,
+            "policy_ref": "KB-HR-001",
         }
+
+    # No relevant policy or record: do not guess, a human gives the final decision
+    if (
+        intent == "general_inquiry"
+        and not order_id
+        and len(message.split()) >= 3
+        and not kb_has_relevant_match(message)
+    ):
+        update = _escalation_update(
+            "No relevant policy or verified record matched this request, so the AI cannot give a reliable answer.",
+            "senior_support",
+            "unresolved_query",
+            "KB-HR-009",
+            state.get("priority") or "medium",
+        )
+        update.update({"investigation": investigation_data, "knowledge_results": []})
+        return update
 
     # Otherwise synthesize resolution response
     kb_guidance = knowledge_list[0].get("guidance", "") if knowledge_list else ""
@@ -447,7 +585,7 @@ def triage_agent_node(state: SupportAgentState) -> Dict[str, Any]:
     elif any(w in message.lower() for w in ["when will", "eta", "arrive", "arrival", "delivery time"]) or intent == "delivery_eta":
         if investigation_data.get("status") == "found":
             if order_st == "delivered":
-                asst_msg = f"Order {order_id} ({item_names}) was delivered on {order_data.get('created_at', '')[:10]}. If you have any delivery discrepancies, please let me know."
+                asst_msg = f"Order {order_id} ({item_names}) was delivered on {(order_data.get('delivered_at') or order_data.get('created_at') or '')[:10]}. If you have any delivery discrepancies, please let me know."
             elif order_st == "shipped":
                 asst_msg = (
                     f"Order {order_id} ({item_names}) is currently dispatched and in transit with our courier partner. "
@@ -479,12 +617,21 @@ def triage_agent_node(state: SupportAgentState) -> Dict[str, Any]:
 
     # 4. Return & Refund Policy Inquiry
     elif any(w in message.lower() for w in ["return policy", "refund policy", "how to return"]) or (intent == "return_or_replacement" and any(w in message.lower() for w in ["policy", "how", "what", "can i"])):
+        return_policy = get_policy("KB-RET-003")
         asst_msg = (
-            "Our Return Policy provides a 30-day risk-free return window for all unused items in their original packaging. "
-            "Pre-paid shipping labels are provided automatically. Once inspected at our returns depot, refunds are credited back to your original payment method within 3 to 5 business days."
+            f"Here is our current return policy: {return_policy['guidance']}"
+            if return_policy
+            else "Please contact support for the current return policy."
         )
         if order_st == "delivered":
-            asst_msg += f"\n\nYour delivered order {order_id} ({item_names}) is currently eligible for return! Would you like me to initiate a return authorization?"
+            elig = json.loads(check_return_eligibility.invoke({"order_id": order_id}))
+            if elig.get("is_eligible"):
+                asst_msg += f"\n\nYour delivered order {order_id} ({item_names}) is currently eligible for return! Would you like me to initiate a return authorization?"
+            elif elig.get("requires_human_review"):
+                asst_msg += (
+                    f"\n\nYour order {order_id} ({item_names}) needs a specialist's approval for a return: {elig.get('reason')} "
+                    "Tell me you'd like to return it and I will pass it to a human for a decision."
+                )
         decision = "return_policy"
 
     # 5. Order Tracking / Status Inquiry
@@ -558,6 +705,13 @@ def triage_router(state: SupportAgentState) -> str:
     return END
 
 
+def action_router(state: SupportAgentState) -> str:
+    """Route from the action agent to escalation when policy requires a human decision."""
+    if state.get("active_agent") == "escalation_agent":
+        return "escalation_agent_node"
+    return END
+
+
 def action_agent_node(state: SupportAgentState) -> Dict[str, Any]:
     """Action Agent: checks eligibility, enforces confirmation guards, and executes actions."""
     order_id = state.get("order_id")
@@ -606,6 +760,12 @@ def action_agent_node(state: SupportAgentState) -> Dict[str, Any]:
                 },
                 "pending_confirmation": None,
             }
+
+        review = cancel_review({"id": order_id, "total_amount": order_data.get("total_amount")})
+        if review:
+            return _escalation_update(
+                review["reason"], review["team"], review["category"], review["policy_ref"], review["priority"]
+            )
 
         # Check if user has confirmed
         is_confirmed = (
@@ -665,6 +825,15 @@ def action_agent_node(state: SupportAgentState) -> Dict[str, Any]:
         elig_raw = check_return_eligibility.invoke({"order_id": order_id})
         elig_data = json.loads(elig_raw)
 
+        if elig_data.get("requires_human_review"):
+            return _escalation_update(
+                elig_data.get("reason", "Return needs human approval."),
+                elig_data.get("review_team", "senior_support"),
+                elig_data.get("review_category", "return_exception"),
+                elig_data.get("policy_ref", "KB-HR-006"),
+                "medium",
+            )
+
         if not elig_data.get("is_eligible"):
             asst_msg = f"Unable to process {req_type} for order {order_id}: {elig_data.get('reason')}"
             return {
@@ -710,79 +879,145 @@ def action_agent_node(state: SupportAgentState) -> Dict[str, Any]:
     }
 
 
+ACTIVE_TICKET_STATUSES = {"open", "assigned", "in_progress", "pending_customer"}
+
+
+def _order_facts(order_id: Optional[str]) -> str:
+    """One-line verified summary of an order and its payments for the human specialist."""
+    if not order_id:
+        return ""
+    order = json.loads(lookup_order.invoke({"order_id": order_id}))
+    if not order.get("found"):
+        return f"Order {order_id} was not found in the records."
+    payments = json.loads(lookup_payment.invoke({"order_id": order_id})).get("payments", [])
+    items = ", ".join(f"{i.get('quantity')}x {i.get('name')}" for i in order.get("items", []))
+    pay_part = (
+        ", ".join(f"{p.get('id')} {p.get('status')} via {p.get('payment_method')} ({p.get('transaction_ref')})" for p in payments)
+        or "no payment records"
+    )
+    return (
+        f"Verified: order {order_id} status '{order.get('status')}', total ${order.get('total_amount', 0.0):.2f}, "
+        f"items: {items}. Payments: {pay_part}."
+    )
+
+
 def escalation_agent_node(state: SupportAgentState) -> Dict[str, Any]:
-    """Escalation & Ticket Agent: generates deduplicated support ticket with SLA and department routing."""
+    """Escalation & Ticket Agent: creates (or reuses) a ticket for a human specialist, with SLA and routing."""
     session_id = state.get("session_id", "")
     customer_id = state.get("customer_id")
     order_id = state.get("order_id")
     intent = state.get("intent", "general_inquiry")
     message = state.get("user_message", "")
     priority = state.get("priority", "medium")
+    sentiment = state.get("sentiment", "neutral")
     reason = state.get("escalation_reason") or "Issue requires human customer support specialist review."
+    category = state.get("ticket_category") or intent
+    policy_ref = state.get("policy_ref") or ""
     team = state.get("target_team") or ("billing_support" if intent == "payment_issue" else "general_support")
 
-    # Search for existing open ticket for this session or order
-    existing_raw = search_tickets.invoke({"customer_id": customer_id or "", "order_id": order_id or "", "status": "open"})
-    try:
-        existing_data = json.loads(existing_raw)
-        matching_tickets = existing_data.get("tickets", [])
-    except Exception:
-        matching_tickets = []
+    inbox_hint = (
+        "The specialist's answer will arrive in your Inbox (My Orders > Inbox)."
+        if customer_id
+        else "Select your customer account in the chat header so the answer can be delivered to your Inbox."
+    )
 
-    if matching_tickets:
-        existing_tkt = matching_tickets[0]
-        ticket_id = existing_tkt["ticket_id"]
+    # Reuse a case that is still being worked on instead of opening duplicates
+    matching_ticket = None
+    if customer_id or order_id:
+        for t in reversed(TICKETS):
+            if t.get("status") not in ACTIVE_TICKET_STATUSES:
+                continue
+            if t.get("category") != category:
+                continue
+            if order_id:
+                same_case = (t.get("order_id") or "").upper() == order_id.upper()
+            else:
+                same_case = (t.get("customer_id") or "").upper() == (customer_id or "").upper()
+            if same_case:
+                matching_ticket = t
+                break
+
+    if matching_ticket:
+        ticket_id = matching_ticket["ticket_id"]
+        if matching_ticket.get("status") in {"in_progress", "assigned"} and matching_ticket.get("assigned_to"):
+            progress = f"{matching_ticket['assigned_to']} has already taken your case and is working on it."
+        else:
+            progress = "It is waiting for a specialist to pick it up."
         asst_msg = (
-            f"Your issue is already actively tracked under Ticket ID: {ticket_id} ({existing_tkt.get('target_team')}). "
-            f"A customer support specialist is assigned and working on your case."
+            f"Your issue is already tracked under Ticket ID: {ticket_id} "
+            f"({(matching_ticket.get('target_team') or team).replace('_', ' ').title()}). {progress} {inbox_hint}"
         )
         ticket_obj = {
             "ticket_id": ticket_id,
             "session_id": session_id,
             "customer_id": customer_id,
-            "order_id": order_id,
-            "category": existing_tkt.get("category", intent),
-            "priority": existing_tkt.get("priority", priority),
-            "status": existing_tkt.get("status", "open"),
-            "original_message": existing_tkt.get("original_message", message),
+            "order_id": matching_ticket.get("order_id") or order_id,
+            "category": matching_ticket.get("category", category),
+            "priority": matching_ticket.get("priority", priority),
+            "status": matching_ticket.get("status", "open"),
+            "original_message": matching_ticket.get("original_message") or message,
             "escalation_reason": reason,
-            "target_team": existing_tkt.get("target_team", team),
-            "created_at": existing_tkt.get("created_at"),
+            "title": matching_ticket.get("title"),
+            "target_team": matching_ticket.get("target_team", team),
+            "created_at": matching_ticket.get("created_at"),
+            "sla_deadline": matching_ticket.get("sla_deadline"),
+            "assigned_to": matching_ticket.get("assigned_to"),
             "is_reused": True,
         }
     else:
-        # Create new support ticket via tool
-        title = f"[{team.replace('_', ' ').title()}] {intent.replace('_', ' ').title()} - {order_id or 'General'}"
+        title = f"[{team.replace('_', ' ').title()}] {category.replace('_', ' ').title()} - {order_id or 'General'}"
+        notes = " | ".join(
+            part
+            for part in (
+                f"Escalated by the AI Support Workflow (sentiment: {sentiment}).",
+                _order_facts(order_id),
+                f"Governing policy: {policy_ref}." if policy_ref else "",
+            )
+            if part
+        )
         tkt_raw = create_support_ticket.invoke({
             "title": title,
-            "category": intent,
+            "category": category,
             "priority": priority,
             "escalation_reason": reason,
             "customer_id": customer_id or "",
             "order_id": order_id or "",
             "target_team": team,
-            "internal_notes": f"Escalated via AI Support Workflow. Customer Statement: '{message}'",
+            "internal_notes": notes,
+            "original_message": message,
+            "policy_ref": policy_ref,
         })
         tkt_res = json.loads(tkt_raw)
         ticket_id = tkt_res.get("ticket_id")
 
-        asst_msg = (
-            f"Your issue has been referred for human support review (Ticket ID: {ticket_id}). "
-            f"A specialist from {team.replace('_', ' ').title()} will review your details and follow up. "
-            f"Target SLA Response Deadline: {tkt_res.get('sla_deadline', 'Within 4 hours')}."
-        )
+        if category == "unresolved_query":
+            asst_msg = (
+                "I could not find an official policy that covers this, and I don't want to guess. "
+                f"I have passed it to a human specialist (Ticket ID: {ticket_id}) who will make the final decision. "
+                f"{inbox_hint}"
+            )
+        else:
+            asst_msg = (
+                f"Your issue has been referred for human support review (Ticket ID: {ticket_id}). "
+                f"A specialist from {team.replace('_', ' ').title()} will review your details and follow up. "
+                f"Target SLA response deadline: {tkt_res.get('sla_deadline', 'within 4 hours')}. {inbox_hint}"
+            )
+        asst_msg += f"\n\nWhy a human is involved: {reason}"
+
         ticket_obj = {
             "ticket_id": ticket_id,
             "session_id": session_id,
             "customer_id": customer_id,
             "order_id": order_id,
-            "category": intent,
+            "category": category,
             "priority": priority,
             "status": "open",
             "original_message": message,
             "escalation_reason": reason,
+            "title": title,
             "target_team": team,
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "sla_deadline": tkt_res.get("sla_deadline"),
             "is_reused": False,
         }
 
@@ -790,6 +1025,7 @@ def escalation_agent_node(state: SupportAgentState) -> Dict[str, Any]:
         "ticket": ticket_obj,
         "assistant_message": asst_msg,
         "decision": "escalated",
+        "pending_confirmation": None,
     }
 
 
@@ -827,7 +1063,14 @@ def build_deterministic_support_graph():
             END: END,
         },
     )
-    workflow.add_edge("action_agent_node", END)
+    workflow.add_conditional_edges(
+        "action_agent_node",
+        action_router,
+        {
+            "escalation_agent_node": "escalation_agent_node",
+            END: END,
+        },
+    )
     workflow.add_edge("escalation_agent_node", END)
 
     memory = MemorySaver()
@@ -932,8 +1175,11 @@ def run_support_workflow(
         "customer_id": resolved_customer_id,
     }
 
+    # Policy-mandated human review always uses the deterministic guard so the LLM cannot skip it
+    review_trigger = detect_human_review_trigger(message)
+
     # Try agentic supervisor if configured
-    if agentic_graph is not None:
+    if agentic_graph is not None and not review_trigger:
         try:
             # Build customer context header if customer_id is linked
             system_context_prefix = ""

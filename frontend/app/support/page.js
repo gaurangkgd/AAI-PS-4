@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import ChatPanel from '../../components/ChatPanel';
+import { apiFetch } from '../../lib/api';
+import { useCustomer, DATA_REFRESH_EVENT } from '../../lib/useCustomer';
 import {
   IconPackage,
   IconReturn,
@@ -16,13 +19,71 @@ import {
 } from '../../components/Icons';
 import { CUSTOMER_PROFILES, getCustomerProfile } from '../../lib/customerContext';
 
+/**
+ * Live "Linked Orders" list: fetched from the backend and refreshed after chat actions,
+ * so a cancelled order shows "cancelled" instead of a hardcoded status.
+ */
+function LinkedOrders({ customerId }) {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiFetch(`/customers/${customerId}/orders`);
+      setOrders(Array.isArray(data) ? data : []);
+    } catch {
+      /* keep last known orders */
+    } finally {
+      setLoading(false);
+    }
+  }, [customerId]);
+
+  useEffect(() => {
+    setLoading(true);
+    load();
+    const timer = setInterval(load, 10000);
+    window.addEventListener(DATA_REFRESH_EVENT, load);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(DATA_REFRESH_EVENT, load);
+    };
+  }, [load]);
+
+  return (
+    <div className="customer-orders-section">
+      <span className="customer-orders-heading">Linked Orders ({orders.length}):</span>
+      {loading ? (
+        <div className="customer-no-orders-msg">Loading orders...</div>
+      ) : orders.length > 0 ? (
+        <div className="customer-orders-list">
+          {orders.map((ord) => (
+            <div key={ord.id} className="customer-order-item">
+              <div className="order-item-top">
+                <span className="order-item-id">{ord.id}</span>
+                <span className={`chip-badge ${ord.status}`}>{ord.status.replace('_', ' ')}</span>
+              </div>
+              <div className="order-item-desc">
+                {ord.items.map((it) => `${it.name}${it.quantity > 1 ? ` (x${it.quantity})` : ''}`).join(', ')}
+              </div>
+              <div className="order-item-total">${ord.total_amount.toFixed(2)}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="customer-no-orders-msg">No orders found for this customer account.</div>
+      )}
+    </div>
+  );
+}
+
 function SupportContent() {
   const searchParams = useSearchParams();
   const queryParam = searchParams.get('query');
 
-  const [selectedCustomerId, setSelectedCustomerId] = useState('CUST001');
+  const [selectedCustomerId, setSelectedCustomerId] = useCustomer();
   const [activeFaq, setActiveFaq] = useState(null);
-  const [queryTrigger, setQueryTrigger] = useState(queryParam || '');
+  const [queryTrigger] = useState(queryParam || '');
+  const [pendingPrompt, setPendingPrompt] = useState(null);
 
   const activeCustomer = getCustomerProfile(selectedCustomerId);
 
@@ -34,8 +95,9 @@ function SupportContent() {
     setSelectedCustomerId(newId);
   };
 
+  // A fresh nonce each click so the same one-click test can be run again
   const handleRunSamplePrompt = (text) => {
-    setQueryTrigger(text);
+    setPendingPrompt({ text, nonce: Date.now() });
   };
 
   const FAQS = [
@@ -99,6 +161,7 @@ function SupportContent() {
         <div className="support-chat-viewport">
           <ChatPanel
             initialQuery={queryTrigger || queryParam}
+            pendingPrompt={pendingPrompt}
             isExpanded={true}
             selectedCustomerId={selectedCustomerId}
             onCustomerChange={handleSelectCustomer}
@@ -116,7 +179,8 @@ function SupportContent() {
             </div>
 
             <p className="rail-card-desc">
-              Context is actively synced with the chat console. Inquiries about order status, delivery, or returns automatically target this account:
+              Context is synced with the chat console, the cart and your Inbox. Replies from human specialists arrive in the{' '}
+              <Link href="/orders?tab=inbox" className="inbox-link">Inbox</Link>.
             </p>
 
             {/* Profile Overview Details */}
@@ -131,34 +195,12 @@ function SupportContent() {
                   <span className="detail-val mono">{activeCustomer.email}</span>
                 </div>
 
-                {/* Orders List */}
-                <div className="customer-orders-section">
-                  <span className="customer-orders-heading">
-                    Linked Orders ({activeCustomer.orders.length}):
-                  </span>
-                  {activeCustomer.orders.length > 0 ? (
-                    <div className="customer-orders-list">
-                      {activeCustomer.orders.map((ord) => (
-                        <div key={ord.id} className="customer-order-item">
-                          <div className="order-item-top">
-                            <span className="order-item-id">{ord.id}</span>
-                            <span className={`chip-badge ${ord.status}`}>{ord.status}</span>
-                          </div>
-                          <div className="order-item-desc">{ord.item}</div>
-                          <div className="order-item-total">${ord.total.toFixed(2)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="customer-no-orders-msg">
-                      No active orders found for this customer account.
-                    </div>
-                  )}
-                </div>
+                {/* Live Orders List */}
+                <LinkedOrders customerId={selectedCustomerId} />
 
                 {/* Context-Aware Prompt Suggestions */}
                 <div className="context-quick-actions">
-                  <span className="quick-actions-title">One-Click Tests (No ID needed):</span>
+                  <span className="quick-actions-title">One-Click Tests (sends instantly, no ID needed):</span>
                   <div className="quick-action-buttons">
                     {activeCustomer.starterPrompts.map((p, idx) => (
                       <button

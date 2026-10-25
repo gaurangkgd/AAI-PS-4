@@ -1,7 +1,20 @@
 """Fictional in-memory mock data for e-commerce store."""
 
 import copy
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
+
+try:
+    from backend.knowledge_base import reset_knowledge_base
+except ImportError:
+    from knowledge_base import reset_knowledge_base
+
+
+def _ago(days=0, hours=0, minutes=0):
+    """ISO timestamp relative to server start so demo order ages stay realistic on any date."""
+    moment = datetime.now(timezone.utc) - timedelta(days=days, hours=hours, minutes=minutes)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 CUSTOMERS = [
     {
@@ -115,7 +128,8 @@ ORDERS = [
         ],
         "total_amount": 129.99,
         "status": "delivered",
-        "created_at": "2026-10-10T09:30:00Z",
+        "created_at": _ago(days=14),
+        "delivered_at": _ago(days=9),
     },
     {
         "id": "ORD1002",
@@ -130,7 +144,7 @@ ORDERS = [
         ],
         "total_amount": 49.90,
         "status": "processing",
-        "created_at": "2026-10-18T14:15:00Z",
+        "created_at": _ago(days=2),
     },
     {
         "id": "ORD1003",
@@ -145,7 +159,7 @@ ORDERS = [
         ],
         "total_amount": 89.50,
         "status": "shipped",
-        "created_at": "2026-10-15T11:00:00Z",
+        "created_at": _ago(days=5),
     },
     {
         "id": "ORD1004",
@@ -160,7 +174,7 @@ ORDERS = [
         ],
         "total_amount": 39.99,
         "status": "payment_failed",
-        "created_at": "2026-10-19T08:20:00Z",
+        "created_at": _ago(days=1, hours=3),
     },
     {
         "id": "ORD1005",
@@ -175,7 +189,23 @@ ORDERS = [
         ],
         "total_amount": 74.99,
         "status": "pending_payment",
-        "created_at": "2026-10-19T10:00:00Z",
+        "created_at": _ago(days=1, hours=1),
+    },
+    {
+        "id": "ORD1006",
+        "customer_id": "CUST002",
+        "items": [
+            {
+                "product_id": "PROD006",
+                "name": "Organic Cotton Hoodie",
+                "quantity": 1,
+                "unit_price": 54.00,
+            }
+        ],
+        "total_amount": 54.00,
+        "status": "delivered",
+        "created_at": _ago(days=50),
+        "delivered_at": _ago(days=45),
     },
 ]
 
@@ -187,7 +217,7 @@ PAYMENTS = [
         "status": "successful",
         "payment_method": "credit_card",
         "transaction_ref": "TXN-908123-SUCCESS",
-        "timestamp": "2026-10-10T09:32:15Z",
+        "timestamp": _ago(days=14, minutes=-2),
     },
     {
         "id": "PAY2002",
@@ -196,7 +226,7 @@ PAYMENTS = [
         "status": "successful",
         "payment_method": "upi",
         "transaction_ref": "TXN-908456-SUCCESS",
-        "timestamp": "2026-10-18T14:16:02Z",
+        "timestamp": _ago(days=2, minutes=-1),
     },
     {
         "id": "PAY2003",
@@ -205,7 +235,7 @@ PAYMENTS = [
         "status": "successful",
         "payment_method": "debit_card",
         "transaction_ref": "TXN-908789-SUCCESS",
-        "timestamp": "2026-10-15T11:02:40Z",
+        "timestamp": _ago(days=5, minutes=-2),
     },
     {
         "id": "PAY2004",
@@ -214,7 +244,7 @@ PAYMENTS = [
         "status": "failed",
         "payment_method": "credit_card",
         "transaction_ref": "TXN-909012-FAILED",
-        "timestamp": "2026-10-19T08:21:10Z",
+        "timestamp": _ago(days=1, hours=3, minutes=-1),
     },
     {
         "id": "PAY2005",
@@ -223,7 +253,16 @@ PAYMENTS = [
         "status": "pending",
         "payment_method": "net_banking",
         "transaction_ref": "TXN-909345-PENDING",
-        "timestamp": "2026-10-19T10:01:05Z",
+        "timestamp": _ago(days=1, hours=1, minutes=-1),
+    },
+    {
+        "id": "PAY2006",
+        "order_id": "ORD1006",
+        "amount": 54.00,
+        "status": "successful",
+        "payment_method": "credit_card",
+        "transaction_ref": "TXN-907555-SUCCESS",
+        "timestamp": _ago(days=50, minutes=-2),
     },
 ]
 
@@ -309,21 +348,83 @@ INITIAL_CSAT = [
     }
 ]
 
+INITIAL_NOTIFICATIONS = [
+    {
+        "id": "NTF-SEED0001",
+        "customer_id": "CUST001",
+        "type": "ticket_resolved",
+        "title": "Case TKT-D983F112 resolved",
+        "message": "Replacement ear cushions for ORD1001 have been dispatched and should arrive in 2-3 business days. Sorry for the inconvenience!",
+        "ticket_id": "TKT-D983F112",
+        "order_id": "ORD1001",
+        "from_agent": "agent_maya",
+        "created_at": "2026-10-22T15:00:00Z",
+        "read": True,
+    },
+    {
+        "id": "NTF-SEED0002",
+        "customer_id": "CUST002",
+        "type": "ticket_assigned",
+        "title": "A specialist is working on case TKT-C712E340",
+        "message": "Our logistics specialist agent_dave is coordinating with the courier about the stalled tracking for ORD1003.",
+        "ticket_id": "TKT-C712E340",
+        "order_id": "ORD1003",
+        "from_agent": "agent_dave",
+        "created_at": "2026-10-21T12:00:00Z",
+        "read": False,
+    },
+    {
+        "id": "NTF-SEED0003",
+        "customer_id": "CUST003",
+        "type": "ticket_opened",
+        "title": "Case TKT-B401A912 opened",
+        "message": "Your payment issue for ORD1004 was referred to Billing Support. We will reply here as soon as a specialist reviews it.",
+        "ticket_id": "TKT-B401A912",
+        "order_id": "ORD1004",
+        "from_agent": None,
+        "created_at": "2026-10-20T10:01:00Z",
+        "read": False,
+    },
+]
+
 # Live working collections
 TICKETS = copy.deepcopy(INITIAL_TICKETS)
 RETURN_REQUESTS = copy.deepcopy(INITIAL_RETURNS)
 CSAT_RATINGS = copy.deepcopy(INITIAL_CSAT)
+NOTIFICATIONS = copy.deepcopy(INITIAL_NOTIFICATIONS)
 
 INITIAL_CUSTOMERS = copy.deepcopy(CUSTOMERS)
+INITIAL_PRODUCTS = copy.deepcopy(PRODUCTS)
 INITIAL_ORDERS = copy.deepcopy(ORDERS)
 INITIAL_PAYMENTS = copy.deepcopy(PAYMENTS)
 
 
+def add_notification(customer_id, notif_type, title, message, ticket_id=None, order_id=None, from_agent=None):
+    """Append an inbox notification for a customer. Silently skips guests (no customer_id)."""
+    if not customer_id:
+        return None
+    entry = {
+        "id": f"NTF-{uuid.uuid4().hex[:8].upper()}",
+        "customer_id": customer_id.strip().upper(),
+        "type": notif_type,
+        "title": title,
+        "message": message,
+        "ticket_id": ticket_id,
+        "order_id": order_id,
+        "from_agent": from_agent,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "read": False,
+    }
+    NOTIFICATIONS.append(entry)
+    return entry
+
+
 def reset_mock_data():
-    """Reset all in-memory collections to initial baseline."""
-    global CUSTOMERS, ORDERS, PAYMENTS, TICKETS, RETURN_REQUESTS, CSAT_RATINGS
+    """Reset all in-memory collections (including AI policies) to the initial demo baseline."""
     CUSTOMERS.clear()
     CUSTOMERS.extend(copy.deepcopy(INITIAL_CUSTOMERS))
+    PRODUCTS.clear()
+    PRODUCTS.extend(copy.deepcopy(INITIAL_PRODUCTS))
     ORDERS.clear()
     ORDERS.extend(copy.deepcopy(INITIAL_ORDERS))
     PAYMENTS.clear()
@@ -334,3 +435,6 @@ def reset_mock_data():
     RETURN_REQUESTS.extend(copy.deepcopy(INITIAL_RETURNS))
     CSAT_RATINGS.clear()
     CSAT_RATINGS.extend(copy.deepcopy(INITIAL_CSAT))
+    NOTIFICATIONS.clear()
+    NOTIFICATIONS.extend(copy.deepcopy(INITIAL_NOTIFICATIONS))
+    reset_knowledge_base()

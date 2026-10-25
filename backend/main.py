@@ -9,6 +9,8 @@ try:
     from backend.ticket_routes import router as ticket_router
     from backend.action_routes import router as action_router
     from backend.admin_routes import router as admin_router
+    from backend.checkout_routes import router as checkout_router
+    from backend.notification_routes import router as notification_router
     from backend.graph import run_support_workflow
 except ImportError:
     from schemas import ChatRequest, ChatResponse
@@ -16,6 +18,8 @@ except ImportError:
     from ticket_routes import router as ticket_router
     from action_routes import router as action_router
     from admin_routes import router as admin_router
+    from checkout_routes import router as checkout_router
+    from notification_routes import router as notification_router
     from graph import run_support_workflow
 
 app = FastAPI(
@@ -40,6 +44,8 @@ app.include_router(ecommerce_router)
 app.include_router(ticket_router)
 app.include_router(action_router)
 app.include_router(admin_router)
+app.include_router(checkout_router)
+app.include_router(notification_router)
 
 
 @app.get("/")
