@@ -1,7 +1,7 @@
 """Customer inbox: notifications about orders and human-support cases."""
 
-from typing import Any, Dict, List
-from fastapi import APIRouter, HTTPException, status
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, HTTPException, Query, status
 
 try:
     from backend.mock_data import NOTIFICATIONS, TICKETS
@@ -9,6 +9,30 @@ except ImportError:
     from mock_data import NOTIFICATIONS, TICKETS
 
 router = APIRouter(tags=["Inbox"])
+
+
+@router.delete("/customers/{customer_id}/notifications", summary="Delete notifications for a customer, optionally filtered by order_id")
+def delete_customer_notifications(customer_id: str, order_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    norm_c = customer_id.strip().upper()
+    norm_o = order_id.strip().upper() if order_id else None
+    before = len(NOTIFICATIONS)
+    if norm_o:
+        NOTIFICATIONS[:] = [
+            n for n in NOTIFICATIONS
+            if not (n.get("customer_id", "").upper() == norm_c and (n.get("order_id") or "").upper() == norm_o)
+        ]
+    else:
+        NOTIFICATIONS[:] = [
+            n for n in NOTIFICATIONS
+            if n.get("customer_id", "").upper() != norm_c
+        ]
+    return {
+        "success": True,
+        "removed": before - len(NOTIFICATIONS),
+        "customer_id": norm_c,
+        "order_id": norm_o,
+    }
+
 
 
 def _customer_notifications(customer_id: str) -> List[Dict[str, Any]]:

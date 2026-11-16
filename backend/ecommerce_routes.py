@@ -83,3 +83,13 @@ def get_order_payments(order_id: str) -> List[Payment]:
         if payment["order_id"].lower() == order_id.strip().lower()
     ]
     return matched_payments
+
+
+@router.delete("/orders/{order_id}", tags=["Orders"])
+def delete_order(order_id: str):
+    norm_id = order_id.strip().upper()
+    before = len(ORDERS)
+    ORDERS[:] = [o for o in ORDERS if o.get("id", "").upper() != norm_id]
+    PAYMENTS[:] = [p for p in PAYMENTS if p.get("order_id", "").upper() != norm_id]
+    return {"success": True, "deleted": before - len(ORDERS), "order_id": norm_id}
+

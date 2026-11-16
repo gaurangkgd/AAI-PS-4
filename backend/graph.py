@@ -634,6 +634,14 @@ def triage_agent_node(state: SupportAgentState) -> Dict[str, Any]:
                 )
         decision = "return_policy"
 
+    # 4b. Cancellation Policy Inquiry
+    elif any(w in message.lower() for w in ["cancellation policy", "cancel policy", "how to cancel"]) or (intent == "cancellation" and any(w in message.lower() for w in ["policy", "how", "what", "can i"])):
+        canc_policy = get_policy("KB-CAN-001")
+        canc_title = canc_policy.get("title", "Order Cancellation Policy") if canc_policy else "Order Cancellation Policy"
+        canc_guidance = canc_policy.get("guidance", kb_guidance) if canc_policy else kb_guidance
+        asst_msg = f"Here is our **{canc_title}**:\n{canc_guidance}"
+        decision = "knowledge_guidance"
+
     # 5. Order Tracking / Status Inquiry
     elif investigation_data.get("status") == "found":
         total_amt = order_data.get("total_amount", 0.0)

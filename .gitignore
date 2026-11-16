@@ -4,6 +4,8 @@ backend/.venv/
 venv/
 ENV/
 env/
+myenv/
+*/myenv/
 
 # Byte-compiled / cache files
 __pycache__/
