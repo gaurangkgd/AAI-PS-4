@@ -119,29 +119,29 @@ sequenceDiagram
     participant DB as Orders DB & Inbox
     actor Human as Human Supervisor (/admin)
 
-    Customer->>Supervisor: "Can you cancel my order ORD1002?"
-    Supervisor->>Supervisor: Classify Intent: 'cancellation' (Target: ORD1002)
-    Supervisor->>ActionAgent: Delegate Cancellation Request
-    ActionAgent->>SafetyGuard: Check Order Status & Mutating Eligibility
-    SafetyGuard-->>Customer: Display Two-Phase Confirmation Card ("Confirm Cancellation" / "Keep Order")
+    Customer->>Supervisor: Inquire to cancel order ORD1002
+    Supervisor->>Supervisor: Classify intent as cancellation
+    Supervisor->>ActionAgent: Route cancellation request
+    ActionAgent->>SafetyGuard: Check order status and eligibility
+    SafetyGuard-->>Customer: Display confirmation card with Confirm or Keep options
     
     alt Customer Confirms Cancellation
-        Customer->>SafetyGuard: Click "Confirm Cancellation"
-        SafetyGuard->>ActionAgent: Authorization Granted
-        ActionAgent->>DB: Mutate status to 'cancelled', trigger refund record
+        Customer->>SafetyGuard: Click Confirm Cancellation
+        SafetyGuard->>ActionAgent: Authorization granted
+        ActionAgent->>DB: Mutate status to cancelled and issue refund
         DB->>DB: Dispatch notification to Customer Inbox
-        ActionAgent-->>Customer: Cancellation Success Message + Interactive 5-Star CSAT Widget
-        Customer->>ActionAgent: Submit 5-Star CSAT Rating
-        ActionAgent->>DB: Record CSAT (Updates /admin Live KPIs)
-    else Complex / Disputed / Anomalous Issue
-        Customer->>Supervisor: "My card was charged $149 but order ORD1005 failed!"
-        Supervisor->>ActionAgent: Detect PAYMENT_GATEWAY_ANOMALY
-        ActionAgent->>DB: Create Escalation Ticket (TIK-1002, 2-Hour VIP SLA)
-        ActionAgent-->>Customer: Reassuring message: Ticket created; resolution will arrive in Inbox
-        DB->>Human: Ticket appears on Supervisor Desk Kanban
-        Human->>Human: Open Take Case Modal, review Case File & KB-HR-001 guidance
-        Human->>DB: Submit Resolution & Dispatch to Customer Inbox
-        DB-->>Customer: Customer Inbox receives specialist resolution
+        ActionAgent-->>Customer: Cancellation confirmed and display 5-star CSAT widget
+        Customer->>ActionAgent: Submit 5-star CSAT rating
+        ActionAgent->>DB: Update CSAT KPI on admin desk
+    else Complex or Anomalous Issue
+        Customer->>Supervisor: Payment deducted but order pending
+        Supervisor->>ActionAgent: Flag payment gateway anomaly
+        ActionAgent->>DB: Create escalation ticket with 2-hour VIP SLA
+        ActionAgent-->>Customer: Ticket created and resolution routed to customer inbox
+        DB->>Human: Ticket appears on Supervisor Kanban
+        Human->>Human: Open Take Case modal and review KB-HR-001 policy
+        Human->>DB: Submit resolution and dispatch response
+        DB-->>Customer: Deliver specialist resolution to Customer Inbox
     end
 ```
 
